@@ -82,6 +82,7 @@ export async function retrieveProviders(input: {
    *  can be named, which is a skipped hold, the same as an unresolvable org. */
   orgId: string | null;
   apiKeyId: number | null;
+  apiKeyIdText?: string | null;
   flags: TeamFlags | null | undefined;
   calls: ProviderCall[];
   requestId: string;
@@ -105,24 +106,40 @@ export async function retrieveProviders(input: {
   if (Buffer.byteLength(JSON.stringify(input.calls)) > 256 * 1024)
     return notExecuted(refusal(400, "Provider options exceed 256 KB."));
 
-  const loadsBashResult = input.calls.some(
+  const loadsSavedResult = input.calls.some(
     call =>
       call.provider === "firecrawl" &&
-      call.capability === "bash" &&
+      (call.capability === "bash" || call.capability === "jev") &&
       typeof call.options?.requestId === "string",
   );
-  if (loadsBashResult && input.calls.length !== 1)
+  if (loadsSavedResult && input.calls.length !== 1)
     return notExecuted(
       refusal(
         400,
-        "Bash source loading must be sent as a separate request; do not batch it with other calls.",
+        "Saved-result loading must be sent as a separate request; do not batch it with other calls.",
       ),
     );
 
+  const termsOnly =
+    input.calls.length > 0 &&
+    input.calls.every(
+      call =>
+        call.provider === "firecrawl" &&
+        (call.capability === "terms/show" ||
+          call.capability === "terms/accept"),
+    );
+  const termsIdentity =
+    termsOnly && input.orgId && input.apiKeyIdText
+      ? { organizationId: input.orgId, apiKeyId: input.apiKeyIdText }
+      : undefined;
   const billable = !input.bypassBilling;
   const id = hash([input.teamId, input.requestId]);
   const key = `alexandria:retrieve:${id}`;
-  const fingerprint = hash([input.calls, billable]);
+  const fingerprint = hash(
+    termsOnly
+      ? [input.calls, billable, termsIdentity ?? null]
+      : [input.calls, billable],
+  );
   const record: Retrieval = {
     fingerprint,
     phase: "executing",
@@ -330,9 +347,10 @@ export async function retrieveProviders(input: {
       body: { requests: input.calls },
       timeoutMs: remaining(),
       requestId: id,
-      ...(loadsBashResult && input.resultAuthorization
+      ...(loadsSavedResult && input.resultAuthorization
         ? { resultAuthorization: input.resultAuthorization }
         : {}),
+      ...(termsIdentity ? { termsIdentity } : {}),
       maximumCredits,
     }).catch(error => {
       throw new Error(`Exchange did not answer: ${error?.message ?? error}`);
