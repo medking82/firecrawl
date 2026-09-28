@@ -22,6 +22,11 @@ import { z } from "zod";
 import fs from "fs/promises";
 import Ajv from "ajv";
 import { extractData } from "../lib/extractSmartScrape";
+import {
+  findStrictSchemaViolation,
+  toRootSchema,
+  typeIncludes,
+} from "../../../lib/openai-strict-schema";
 import { CostTracking } from "../../../lib/cost-tracking";
 import { isAgentExtractModelValid } from "../../../controllers/v1/types";
 import { hasFormatOfType } from "../../../lib/format-utils";
@@ -131,7 +136,7 @@ function normalizeSchema(x: any): any {
     x.not = normalizeSchema(x.not);
   }
 
-  if (x && x.type === "object") {
+  if (x && typeIncludes(x.type, "object")) {
     return {
       ...x,
       properties: Object.fromEntries(
@@ -143,7 +148,7 @@ function normalizeSchema(x: any): any {
       required: Object.keys(x.properties || {}),
       additionalProperties: false,
     };
-  } else if (x && x.type === "array") {
+  } else if (x && typeIncludes(x.type, "array")) {
     return {
       ...x,
       items: normalizeSchema(x.items),
@@ -152,6 +157,38 @@ function normalizeSchema(x: any): any {
     return x;
   }
 }
+
+/**
+ * Whether text is JSON cut off before its end: an unclosed string, object or
+ * array. That only happens when the model ran out of output tokens, and no
+ * repair can recover the part that was never generated. A closing bracket that
+ * doesn't match the open one is malformed rather than cut off, so the repair
+ * still gets a chance at it.
+ */
+export function isTruncatedJson(text: string): boolean {
+  const open: string[] = [];
+  let inString = false;
+  let escaped = false;
+  for (const char of text) {
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+    } else if (char === '"') {
+      inString = true;
+    } else if (char === "{" || char === "[") {
+      open.push(char);
+    } else if (char === "}" || char === "]") {
+      if (open.pop() !== (char === "}" ? "{" : "[")) return false;
+    }
+  }
+  return inString || open.length > 0;
+}
+
+// Thrown when structured output hit the model's output token limit. The
+// partial JSON is not returned.
+const OUTPUT_LIMIT_MESSAGE =
+  "the extracted data exceeded the model's maximum output length, so nothing was returned. Try a schema or prompt that asks for fewer items.";
 
 interface TrimResult {
   text: string;
@@ -340,6 +377,20 @@ export async function generateCompletions({
 
   if (markdown === undefined) {
     throw new Error("document.markdown is undefined -- this is unexpected");
+  }
+
+  // Keep the content inside the model's context window, leaving the rest for
+  // the prompt, schema and output. Models without known limits are sent the
+  // content as-is. A BPE token is at least one byte, so content that fits in
+  // bytes skips the (synchronous) tokenizer entirely.
+  const maxInputTokens = modelPrices[modelId]?.max_input_tokens;
+  if (markdown && maxInputTokens) {
+    const maxContentTokens = Math.floor(maxInputTokens * 0.8);
+    if (Buffer.byteLength(markdown, "utf8") > maxContentTokens) {
+      const trimmed = trimToTokenLimit(markdown, maxContentTokens, modelId);
+      markdown = trimmed.text;
+      warning = trimmed.warning;
+    }
   }
 
   try {
@@ -565,29 +616,21 @@ export async function generateCompletions({
     if (schema && !(schema instanceof z.ZodType)) {
       // let schema = options.schema;
       if (schema) {
-        schema = removeDefaultProperty(schema);
+        schema = toRootSchema(removeDefaultProperty(schema));
       }
 
-      if (schema && schema.type === "array") {
+      // Structured outputs need a (non-nullable) object at the root.
+      if (schema && typeIncludes(schema.type, "array")) {
         schema = {
           type: "object",
           properties: {
-            items: options.schema,
+            items: schema,
           },
           required: ["items"],
           additionalProperties: false,
         };
-      } else if (schema && typeof schema === "object" && !schema.type) {
-        schema = {
-          type: "object",
-          properties: Object.fromEntries(
-            Object.entries(schema).map(([key, value]) => {
-              return [key, removeDefaultProperty(value)];
-            }),
-          ),
-          required: Object.keys(schema),
-          additionalProperties: false,
-        };
+      } else if (schema && typeIncludes(schema.type, "object")) {
+        schema = { ...schema, type: "object" };
       }
 
       schema = normalizeSchema(schema);
@@ -595,6 +638,11 @@ export async function generateCompletions({
 
     const repairConfig = {
       experimental_repairText: async ({ text, error }) => {
+        // Output cut off at the token limit; see OUTPUT_LIMIT_MESSAGE.
+        if (typeof text === "string" && isTruncatedJson(text)) {
+          return null;
+        }
+
         // AI may output a markdown JSON code block. Remove it - mogery
         logger.debug("Repairing text", {
           textType: typeof text,
@@ -878,6 +926,9 @@ export async function generateCompletions({
         }
       } else if (NoObjectGeneratedError.isInstance(error)) {
         logger.warn("No object generated", { error });
+        if (error.finishReason === "length") {
+          throw new Error(OUTPUT_LIMIT_MESSAGE);
+        }
         if (
           error.text &&
           error.text.startsWith("```json") &&
@@ -1469,6 +1520,9 @@ export async function generateSchemaFromPrompt(
   const retryModel = getModel("gpt-4.1-mini", "openai");
   const temperatures = [0, 0.1, 0.3]; // Different temperatures to try
   let lastError: Error | null = null;
+  // The last schema strict mode would reject, used only if no attempt
+  // produces a supported one (extraction then fails with a warning as before).
+  let lastUnsupportedSchema: any = undefined;
 
   for (const temp of temperatures) {
     try {
@@ -1489,16 +1543,18 @@ Consider:
 
 Valid JSON schema, has to be simple. No crazy properties. OpenAI has to support it.
 Supported types
-The following types are supported for Structured Outputs:
+The following values of "type" are supported for Structured Outputs, written exactly like this (lowercase):
 
-String
-Number
-Boolean
-Integer
-Object
-Array
-Enum
-anyOf
+string
+number
+boolean
+integer
+object
+array
+
+Use "enum" as a keyword next to "type": "string" to restrict values; it is not a type. Use "anyOf" for alternatives.
+Every array must define "items" as a single schema object. Every property must be a schema object with a "type".
+allOf, oneOf, not, and if/then/else are not supported.
 
 Formats are not supported. Min/max are not supported. Anything beyond the above is not supported. Keep it simple with types and descriptions.
 Optionals are not supported.
@@ -1524,12 +1580,24 @@ Return a valid JSON schema object with properties that would capture the informa
         zeroDataRetention,
       });
 
-      return { extract };
+      const violation = findStrictSchemaViolation(extract);
+      if (violation === null) {
+        return { extract };
+      }
+      logger.warn("Generated schema is not supported by structured outputs", {
+        violation,
+        temperature: temp,
+      });
+      lastUnsupportedSchema = extract;
     } catch (error) {
       lastError = error as Error;
       logger.warn(`Failed attempt with temperature ${temp}: ${error.message}`);
       continue;
     }
+  }
+
+  if (lastUnsupportedSchema !== undefined) {
+    return { extract: lastUnsupportedSchema };
   }
 
   // If we get here, all attempts failed

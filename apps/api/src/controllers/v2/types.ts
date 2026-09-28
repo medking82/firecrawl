@@ -1,3 +1,4 @@
+import type { AgentInteropStatus } from "../../lib/agent-interop";
 import { Request, Response } from "express";
 import { hasCategory } from "../../lib/search-query-builder";
 import { config } from "../../config";
@@ -8,6 +9,7 @@ import { hasReachableHost } from "../../lib/url-utils";
 import { countries } from "../../lib/validate-country";
 import { includesFormat } from "../../lib/format-utils";
 import { addPathRegexIssues, pathPatternsSchema } from "../../lib/crawl-regex";
+import { addStrictSchemaIssue } from "../../lib/openai-strict-schema";
 import {
   ExtractorOptions,
   PageOptions,
@@ -359,7 +361,8 @@ const jsonFormatWithOptions = z.strictObject({
     .transform(val => normalizeSchemaForOpenAI(val))
     .refine(val => validateSchemaForOpenAI(val), {
       message: OPENAI_SCHEMA_ERROR_MESSAGE,
-    }),
+    })
+    .superRefine(addStrictSchemaIssue),
   prompt: z.string().max(10000).optional(),
   checkPromptInjection: z.boolean().optional(),
 });
@@ -394,7 +397,8 @@ const changeTrackingFormatWithOptions = z.strictObject({
     .transform(val => normalizeSchemaForOpenAI(val))
     .refine(val => validateSchemaForOpenAI(val), {
       message: OPENAI_SCHEMA_ERROR_MESSAGE,
-    }),
+    })
+    .superRefine(addStrictSchemaIssue),
   modes: z.enum(["json", "git-diff"]).array().optional().prefault([]),
   tag: z.string().or(z.null()).prefault(null),
 });
@@ -1004,7 +1008,8 @@ const extractOptions = z
       .transform(val => normalizeSchemaForOpenAI(val))
       .refine(val => validateSchemaForOpenAI(val), {
         message: OPENAI_SCHEMA_ERROR_MESSAGE,
-      }),
+      })
+      .superRefine(addStrictSchemaIssue),
     limit: z.int().positive().finite().optional(),
     ignoreSitemap: z.boolean().prefault(false),
     includeSubdomains: z.boolean().prefault(true),
@@ -2015,6 +2020,9 @@ export type CrawlErrorsResponse =
 type AuthObject = {
   team_id: string;
   org_id?: string | null;
+  // Set only by authMiddleware from the raw request; controllers may re-parse
+  // the body and drop `__agentInterop`, so read this instead.
+  agentInterop?: AgentInteropStatus;
 };
 
 type Account = {

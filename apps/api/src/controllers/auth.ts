@@ -11,7 +11,7 @@ import {
   getRateLimitOverride,
   HOBBY_RATE_LIMIT_MULTIPLIER,
 } from "../services/rate-limiter";
-import { isAgentInteropSecretValid } from "../lib/agent-interop";
+import { isTrustedAgentInteropRequest } from "../lib/agent-interop";
 import {
   KEYLESS_FREE_TIER_LIMIT_MESSAGE,
   consumeKeylessRequest,
@@ -636,7 +636,7 @@ export async function authenticateUser(
   req,
   res,
   mode: RateLimiterMode,
-  options?: { allowKeyless?: boolean },
+  options?: AuthenticateOptions,
 ): Promise<AuthResponse> {
   const bypassChunk = mockACUC();
   bypassChunk.is_extract =
@@ -688,21 +688,18 @@ async function buildAuthenticatedRateLimiter(
   return getAutumnRateLimiter(mode, multiplier, flags);
 }
 
-/**
- * Whether the request carries a valid `__agentInterop` secret, i.e. comes from
- * the trusted internal agent service. Read from the raw body because auth runs
- * before the controller's zod parse — the same shape checkCreditsMiddleware
- * relies on. Presence of the block alone is never trusted; only the secret.
- */
-function isTrustedAgentInteropRequest(req): boolean {
-  return isAgentInteropSecretValid(req.body?.__agentInterop?.auth);
-}
+type AuthenticateOptions = {
+  allowKeyless?: boolean;
+  // Route opt-in: a trusted agent-interop request may authenticate with a
+  // hosted_mcp_oauth key, which agent runs started from the hosted MCP carry.
+  allowAgentManagedKey?: boolean;
+};
 
 async function supaAuthenticateUser(
   req,
   res,
   mode: RateLimiterMode,
-  options?: { allowKeyless?: boolean },
+  options?: AuthenticateOptions,
 ): Promise<AuthResponse> {
   const authHeader =
     req.headers.authorization ??
@@ -730,7 +727,8 @@ async function supaAuthenticateUser(
   // the team's own bucket, so a free team (×1) gets throttled by its own agent.
   // Floor trusted agent traffic at the hobby multiplier; paid plans already
   // meet it and are unchanged.
-  const minRateMultiplier = isTrustedAgentInteropRequest(req)
+  const trustedAgentInterop = isTrustedAgentInteropRequest(req);
+  const minRateMultiplier = trustedAgentInterop
     ? HOBBY_RATE_LIMIT_MULTIPLIER
     : undefined;
 
@@ -873,6 +871,23 @@ async function supaAuthenticateUser(
     }
 
     chunk = await getACUC(normalizedApi, false, true, RateLimiterMode.Scrape);
+
+    // Agent runs from the hosted MCP hold the grant's hosted_mcp_oauth key,
+    // not a general one. Accept it only from the trusted agent service, only
+    // on opted-in routes, and only via the uncached primary-read lookup.
+    if (
+      chunk === null &&
+      options?.allowAgentManagedKey === true &&
+      trustedAgentInterop
+    ) {
+      chunk = await getACUC(
+        normalizedApi,
+        false,
+        false,
+        RateLimiterMode.Scrape,
+        "hosted_mcp_oauth",
+      );
+    }
 
     if (chunk === null) {
       return {
