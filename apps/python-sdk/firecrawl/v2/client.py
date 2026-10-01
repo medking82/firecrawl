@@ -907,7 +907,8 @@ class FirecrawlClient:
             CrawlJob in a terminal state ("completed", "failed", or "cancelled")
 
         Raises:
-            TimeoutError: If the job does not finish within timeout
+            CrawlJobTimeoutError: If the job does not finish within timeout (a
+                ``TimeoutError`` subclass that carries ``job_id`` and ``timeout``)
         """
         return crawl_module.wait_for_crawl_completion(
             self.http_client,
@@ -1519,7 +1520,7 @@ class FirecrawlClient:
             schema: Target JSON schema for the output (dict or Pydantic BaseModel)
             integration: Integration tag/name
             max_credits: Maximum credits to use (optional)
-            model: Model to use for the agent ("spark-1-pro" (default), "spark-1-mini", or "spark-2")
+            model: Model to use for the agent ("spark-2", the default; "spark-1-pro" and "spark-1-mini" are deprecated and run spark-2)
             effort: Reasoning effort for the agent ("low", "medium", or "high")
             webhook: Webhook URL or configuration for notifications
             threat_protection: Enterprise per-request override of the team's
@@ -1579,7 +1580,7 @@ class FirecrawlClient:
             poll_interval: Seconds between status checks
             timeout: Maximum seconds to wait (None for no timeout)
             max_credits: Maximum credits to use (optional)
-            model: Model to use for the agent ("spark-1-pro" (default), "spark-1-mini", or "spark-2")
+            model: Model to use for the agent ("spark-2", the default; "spark-1-pro" and "spark-1-mini" are deprecated and run spark-2)
             effort: Reasoning effort for the agent ("low", "medium", or "high")
             webhook: Webhook URL or configuration for notifications
             threat_protection: Enterprise per-request override of the team's
