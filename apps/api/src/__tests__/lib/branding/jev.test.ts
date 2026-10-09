@@ -472,6 +472,87 @@ describe("branding with Jev", () => {
     ]);
   });
 
+  it("drops fallback fonts and unplaced extras once headings and body are covered", async () => {
+    const input = baseInput(new CostTracking());
+    input.jsAnalysis.typography = {
+      fontFamilies: { primary: "Inter", heading: "Inter" },
+    };
+    input.jsAnalysis.fonts = [
+      { family: "Inter", count: 40 },
+      { family: "Segoe UI", count: 20 },
+      { family: "Roboto", count: 10 },
+      { family: "Canela", count: 5 },
+    ];
+    respondWith(
+      jevResponse({
+        font_0_is_brand: { type: "noul", noul: 0.95 },
+        font_1_is_brand: { type: "noul", noul: 0.9 },
+        font_2_is_brand: { type: "noul", noul: 0.9 },
+        font_3_is_brand: { type: "noul", noul: 0.9 },
+        font_3_role: {
+          type: "choice",
+          choice: "unknown",
+          probabilities: { unknown: 1 },
+          confidence: 0.9,
+        },
+      }),
+    );
+
+    const result = await enhanceBrandingWithLLM(input);
+
+    expect(result.cleanedFonts).toEqual([{ family: "Inter", role: "body" }]);
+  });
+
+  it("keeps the typography role of a family merged under its spaced name", async () => {
+    const input = baseInput(new CostTracking());
+    input.jsAnalysis.typography = {
+      fontFamilies: { primary: "Inter", heading: "CormorantGaramond" },
+    };
+    input.jsAnalysis.fonts = [
+      { family: "Inter", count: 40 },
+      { family: "CormorantGaramond", count: 10 },
+      { family: "Cormorant Garamond", count: 5 },
+      { family: "Open-Sans", count: 3 },
+      { family: "Open Sans", count: 2 },
+    ];
+
+    const request = buildJevRequest(input);
+
+    expect(request.fonts.map(f => [f.family, f.role])).toEqual([
+      ["Inter", "body"],
+      ["Cormorant Garamond", "heading"],
+      ["Open-Sans", undefined],
+      ["Open Sans", undefined],
+    ]);
+  });
+
+  it("keeps a fallback font the page uses for text, or when it is all there is", async () => {
+    const input = baseInput(new CostTracking());
+    input.jsAnalysis.typography = { fontFamilies: { primary: "Arial" } };
+    input.jsAnalysis.fonts = [{ family: "Arial", count: 40 }];
+    respondWith(jevResponse({ font_0_is_brand: { type: "noul", noul: 0.9 } }));
+    expect((await enhanceBrandingWithLLM(input)).cleanedFonts).toEqual([
+      { family: "Arial", role: "body" },
+    ]);
+
+    const only = baseInput(new CostTracking());
+    only.jsAnalysis.fonts = [{ family: "Helvetica", count: 40 }];
+    respondWith(
+      jevResponse({
+        font_0_is_brand: { type: "noul", noul: 0.9 },
+        font_0_role: {
+          type: "choice",
+          choice: "unknown",
+          probabilities: { unknown: 1 },
+          confidence: 0.9,
+        },
+      }),
+    );
+    expect((await enhanceBrandingWithLLM(only)).cleanedFonts).toEqual([
+      { family: "Helvetica", role: "unknown" },
+    ]);
+  });
+
   it("takes font roles from the page's typography when it has them", async () => {
     const input = baseInput(new CostTracking());
     input.jsAnalysis.typography = {
@@ -731,6 +812,31 @@ describe("Jev request building", () => {
     ]);
   });
 
+  it("sends only well-formed Unicode text", () => {
+    // "𝐁" (U+1D401) is a surrogate pair. The branding script truncates button
+    // text by code unit, which can leave its first half alone at the end.
+    const bold = "\u{1D401}";
+    const input = baseInput(new CostTracking());
+    input.pageTitle = "a".repeat(199) + bold;
+    input.buttons![0].text = "Beyond the Storefront " + bold + "\uD835";
+    input.buttons![1].text = "x".repeat(39) + bold;
+
+    const request = buildJevRequest(input);
+    const page = request.state.page as Record<string, string>;
+    const buttons = request.state.buttons as Record<
+      string,
+      Record<string, string>
+    >;
+
+    // clip() drops a pair it would cut in half rather than keep one half.
+    expect(page.title).toBe("a".repeat(199));
+    expect(buttons.button_0.text).toBe(
+      "Beyond the Storefront " + bold + "\uFFFD",
+    );
+    // JSON.stringify escapes lone surrogates as \udxxx; none may remain.
+    expect(JSON.stringify(request.state)).not.toMatch(/\\ud[89a-f]/i);
+  });
+
   it("names common colors", () => {
     expect(describeColor("#E2511A")).toBe("vivid orange");
     expect(describeColor("#0A2540")).toBe("very dark blue");
@@ -745,5 +851,19 @@ describe("Jev request building", () => {
     expect(cleanFontFamily("var(--font-sans)")).toBeUndefined();
     expect(cleanFontFamily("'Söhne'")).toBe("Söhne");
     expect(cleanFontFamily("ui-sans-serif")).toBeUndefined();
+    expect(cleanFontFamily("system-ui, sans-serif")).toBeUndefined();
+    expect(cleanFontFamily("Inter, sans-serif")).toBe("Inter");
+    expect(cleanFontFamily("Newsreader Variable")).toBe("Newsreader");
+  });
+
+  it("merges a family listed with and without spaces", () => {
+    const input = baseInput(new CostTracking());
+    input.jsAnalysis.fonts = [
+      { family: "CormorantGaramond", count: 10 },
+      { family: "Cormorant Garamond", count: 5 },
+    ];
+    expect(buildJevRequest(input).fonts).toEqual([
+      { family: "Cormorant Garamond", count: 15, role: undefined },
+    ]);
   });
 });
