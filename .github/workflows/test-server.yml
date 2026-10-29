@@ -34,7 +34,8 @@ jobs:
         # proxy: ["proxy", "no-proxy"]
         # search: ["searxng", "google"]
         # ai: ["openai", "no-ai"]
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    # Blacksmith runners are installed on the upstream repository, not forks.
+    runs-on: ${{ github.repository == 'firecrawl/firecrawl' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
     services:
       redis:
         image: redis
@@ -540,7 +541,7 @@ jobs:
 
   nuq-fdb-core:
     name: NuQ FoundationDB core tests
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ${{ github.repository == 'firecrawl/firecrawl' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
     services:
       redis:
         image: redis

@@ -10,7 +10,8 @@ on:
 
 jobs:
   audit:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    # Forks do not have the upstream Blacksmith runner installation.
+    runs-on: ${{ github.repository == 'firecrawl/firecrawl' && 'blacksmith-2vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Install Node.js
