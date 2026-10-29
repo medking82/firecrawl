@@ -89,7 +89,7 @@ overrides:
   "esbuild@>=0.17.0 <0.28.1": "0.28.1"
   "query-string@>=9.0.0 <10.0.0": ">=9.5.0 <10.0.0"
   # GHSA-qr28-fpjm-wq7f: fix the 0.5.x denial-of-service vulnerability.
-  "decode-uri-component@>=0.5.0 <0.5.1": "0.5.1"
+  "decode-uri-component@>=0.5.0 <0.5.1": ">=0.5.1 <0.6.0"
   # GHSA-866g-f22w-33x8: pin the 4.x line only. Exact 4.0.51 cannot
   # resolve to 5.x.
   "@ai-sdk/provider-utils@>=4.0.0 <4.0.33": "4.0.51"
