@@ -34,7 +34,8 @@ jobs:
         # proxy: ["proxy", "no-proxy"]
         # search: ["searxng", "google"]
         # ai: ["openai", "no-ai"]
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    # Blacksmith runners are installed on the upstream repository, not forks.
+    runs-on: ${{ github.repository == 'firecrawl/firecrawl' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
     services:
       redis:
         image: redis
@@ -393,6 +394,15 @@ jobs:
         env:
           npm_config_ignore_scripts: 'true' # required currently to prevent re-building cached native lib
 
+      - name: Run self-hosted monitor retention and CLI contracts
+        if: matrix.engine == 'fetch' && matrix.proxy == 'no-proxy' && matrix.nuq == 'postgres'
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+          OPENAI_API_KEY: ''
+        run: |
+          node --test deployment/self-hosted-monitor/retention.test.cjs
+          python3 -B -m unittest discover -s deployment/self-hosted-monitor -p 'test_codex_judge.py'
+
       - name: Publish test report
         if: always()
         shell: python3 {0}
@@ -540,7 +550,7 @@ jobs:
 
   nuq-fdb-core:
     name: NuQ FoundationDB core tests
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ${{ github.repository == 'firecrawl/firecrawl' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
     services:
       redis:
         image: redis

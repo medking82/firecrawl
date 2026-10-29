@@ -767,7 +767,7 @@ async function logScrapeInternal(scrape: LoggedScrape, hooks?: LogScrapeHooks) {
   if (
     !scrape.is_parse &&
     scrape.doc &&
-    config.GCS_BUCKET_NAME &&
+    (config.GCS_BUCKET_NAME || process.env.SELF_HOSTED_ARTIFACT_DIR) &&
     !(scrape.skipNuq && scrape.zeroDataRetention)
   ) {
     await saveScrapeToGCS(scrape, logger);
@@ -778,6 +778,7 @@ async function logScrapeInternal(scrape: LoggedScrape, hooks?: LogScrapeHooks) {
     scrape.is_successful &&
     !scrape.zeroDataRetention &&
     config.USE_DB_AUTHENTICATION &&
+    !process.env.SELF_HOSTED_ARTIFACT_DIR &&
     !scrape.team_id.startsWith("preview_")
   ) {
     const hasMarkdown = hasFormatOfType(scrape.options.formats, "markdown");
