@@ -1,4 +1,5 @@
 import { config } from "../config";
+import { localHangarRequest } from "./local-hangar";
 import { type BrowserOptions, hangarBrowserOptions } from "./browser-options";
 
 export interface HangarBrowser {
@@ -62,7 +63,9 @@ async function request<T>(
     );
   let response: globalThis.Response;
   try {
-    response = await fetch(
+    response = process.env.SELF_HOSTED_BROWSER_SOCKET
+      ? await localHangarRequest(method, `/v1/${options?.resource ?? "browsers"}${path}`, body, options?.key, options?.timeout)
+      : await fetch(
       `${config.HANGAR_URL.replace(/\/$/, "")}/v1/${options?.resource ?? "browsers"}${path}`,
       {
         method,

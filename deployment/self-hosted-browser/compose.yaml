@@ -1,0 +1,97 @@
+name: firecrawl-browser
+services:
+  app-db:
+    pull_policy: never
+    image: ${POSTGRES_IMAGE:?pin the existing NuQ PostgreSQL image by ID}
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${APP_DB_PASSWORD:?set a private password}
+      POSTGRES_DB: browser
+    volumes:
+      - app-db:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U postgres -d browser"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    mem_limit: 768m
+    cpus: 1.0
+  redis:
+    pull_policy: never
+    image: ${REDIS_IMAGE:?pin existing Redis image by ID}
+    restart: unless-stopped
+    command: [redis-server, --appendonly, "yes"]
+    volumes:
+      - redis:/data
+    mem_limit: 256m
+    cpus: 0.5
+  rabbitmq:
+    pull_policy: never
+    image: ${RABBIT_IMAGE:?pin existing RabbitMQ image by ID}
+    restart: unless-stopped
+    environment:
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "+S 2:2 +A 4"
+    healthcheck:
+      test: [CMD, rabbitmq-diagnostics, -q, check_running]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - rabbit:/var/lib/rabbitmq
+    mem_limit: 512m
+    cpus: 0.5
+  api:
+    pull_policy: never
+    image: ${BROWSER_API_IMAGE:?build the reviewed overlay first}
+    restart: unless-stopped
+    command: [node, dist/src/harness.js, --start-docker]
+    depends_on:
+      app-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    ports:
+      - "127.0.0.1:3007:3002"
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3002"
+      ENV: local
+      USE_DB_AUTHENTICATION: "true"
+      DATABASE_URL: postgresql://postgres:${APP_DB_PASSWORD}@app-db:5432/browser
+      DISABLE_MONITORING: "true"
+      SELF_HOSTED_ARTIFACT_DIR: /var/lib/firecrawl/artifacts
+      SELF_HOSTED_BROWSER_SOCKET: /run/firecrawl-browser/manager.sock
+      SELF_HOSTED_BROWSER_LLM_SOCKET: /run/firecrawl-browser/llm/browser.sock
+      HANGAR_URL: http://self-hosted-browser
+      REDIS_URL: redis://redis:6379
+      REDIS_RATE_LIMIT_URL: redis://redis:6379
+      NUQ_BACKEND: pg
+      NUQ_RABBITMQ_URL: amqp://rabbitmq:5672
+      POSTGRES_HOST: app-db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${APP_DB_PASSWORD}
+      # The cached NuQ image bootstraps its queue schema in the postgres DB.
+      # Application tables remain isolated in DATABASE_URL's browser DB.
+      POSTGRES_DB: postgres
+      POSTGRES_PORT: "5432"
+      NUM_WORKERS_PER_QUEUE: "1"
+      NUQ_WORKER_COUNT: "1"
+      CRAWL_CONCURRENT_REQUESTS: "1"
+      MAX_CONCURRENT_JOBS: "1"
+      BROWSER_POOL_SIZE: "1"
+      HARNESS_STARTUP_TIMEOUT_MS: "120000"
+      LOGGING_LEVEL: info
+      # No inherited .env_file or Cloud keys. Local lifecycle and CLI Unix sockets only.
+    volumes:
+      - artifacts:/var/lib/firecrawl/artifacts
+      - ${BROWSER_STATE_DIR:?private lifecycle bridge directory}:/run/firecrawl-browser:ro
+    mem_limit: 4g
+    cpus: 1.5
+volumes:
+  app-db:
+  redis:
+  rabbit:
+  artifacts:
+

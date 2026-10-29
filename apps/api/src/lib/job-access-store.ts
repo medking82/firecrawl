@@ -3,6 +3,11 @@ import { getBigtableTable } from "./bigtable-client";
 import { saltedUuidV7RowKey } from "./bigtable-row-key";
 import { persistedTeamId } from "./keyless-team";
 import { setSpanAttributes, withSpan } from "./otel-tracer";
+import {
+  localBrowserJobStoreEnabled,
+  readLocalBrowserJob,
+  writeLocalBrowserJob,
+} from "./local-browser-job-store";
 
 /**
  * Default lifetime of a job's access row, used by writes that do not pass
@@ -73,6 +78,12 @@ function parseApiJobAccess(value: Buffer | string): ApiJobAccess {
 export async function readApiJobAccess(
   id: string,
 ): Promise<ApiJobAccess | null> {
+  if (localBrowserJobStoreEnabled()) {
+    const value = await readLocalBrowserJob("access", id);
+    if (value === null) return null;
+    const access = parseApiJobAccess(value);
+    return access.expiresAtMs > Date.now() ? access : null;
+  }
   const tableId = config.BIGTABLE_JOB_ACCESS_TABLE;
   if (!tableId) return null;
 
@@ -117,6 +128,29 @@ export async function writeApiJobAccess(params: {
   zeroDataRetentionMinutes?: number;
 }): Promise<boolean> {
   const tableId = config.BIGTABLE_JOB_ACCESS_TABLE;
+  const local = localBrowserJobStoreEnabled();
+  if (!tableId && !local) return false;
+  const storedValue = {
+    version: 1,
+    teamId: params.teamId,
+    kind: params.kind,
+    expiresAtMs: params.expiresAt.getTime(),
+    ...(params.kind === "agent" && params.clientOrigin
+      ? { clientOrigin: params.clientOrigin }
+      : {}),
+    ...(params.kind === "agent" &&
+    params.zeroDataRetention &&
+    params.zeroDataRetentionMinutes !== undefined
+      ? { zeroDataRetentionMinutes: params.zeroDataRetentionMinutes }
+      : {}),
+  };
+  if (local)
+    return writeLocalBrowserJob(
+      "access",
+      params.id,
+      storedValue,
+      params.expiresAt.getTime(),
+    );
   if (!tableId) return false;
 
   return withSpan(
@@ -128,22 +162,7 @@ export async function writeApiJobAccess(params: {
         "bigtable.operation": "mutate",
         "job_access.kind": params.kind,
       });
-      const value = Buffer.from(
-        JSON.stringify({
-          version: 1,
-          teamId: params.teamId,
-          kind: params.kind,
-          expiresAtMs: params.expiresAt.getTime(),
-          ...(params.kind === "agent" && params.clientOrigin
-            ? { clientOrigin: params.clientOrigin }
-            : {}),
-          ...(params.kind === "agent" &&
-          params.zeroDataRetention &&
-          params.zeroDataRetentionMinutes !== undefined
-            ? { zeroDataRetentionMinutes: params.zeroDataRetentionMinutes }
-            : {}),
-        }),
-      );
+      const value = Buffer.from(JSON.stringify(storedValue));
       const table = await getBigtableTable(tableId);
       await table.mutate([
         {
