@@ -293,7 +293,8 @@ const mutate=async(kind,id,value,expiry=Date.now()+60000)=>{
   assert.equal(stored.teamId,team); assert.equal(stored.kind,'scrape');
   assert.equal((await operational.getScrapeJobAccess(id)).teamId,team);
   assert.equal(await state.writeScrapeJobState(id,terminal),true);
-  assert.equal(JSON.stringify(await state.readScrapeJobState(id)),JSON.stringify(terminal));
+  // JSONB canonicalizes object key order. Compare values across VM realms.
+  assert.deepEqual(JSON.parse(JSON.stringify(await state.readScrapeJobState(id))),terminal);
   const insert=queries.find(q=>q.sql.includes('INSERT INTO'));
   assert(insert.sql.includes('$1')&&insert.sql.includes('$2::uuid')&&insert.sql.includes('$3::jsonb'));
   assert(!insert.sql.includes(team)); assert(!insert.sql.includes(id));
