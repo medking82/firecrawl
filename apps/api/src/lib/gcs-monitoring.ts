@@ -1,5 +1,6 @@
 import { config } from "../config";
 import { storage } from "./gcs-jobs";
+import { localArtifactsEnabled, readLocalArtifact, writeLocalArtifact } from "./local-artifacts";
 
 type MonitorDiffArtifactBase = {
   url: string;
@@ -64,6 +65,10 @@ export async function saveMonitorDiffArtifact(
   artifact: MonitorDiffArtifact,
 ): Promise<{ textBytes: number; jsonBytes: number }> {
   const payload = JSON.stringify(artifact);
+  if (localArtifactsEnabled()) {
+    await writeLocalArtifact(key, artifact);
+    return artifactBytes(artifact);
+  }
   if (!config.GCS_BUCKET_NAME) {
     return artifactBytes(artifact);
   }
@@ -80,6 +85,9 @@ export async function saveMonitorDiffArtifact(
 export async function getMonitorDiffArtifact(
   key: string | null | undefined,
 ): Promise<MonitorDiffArtifact | null> {
+  if (key && localArtifactsEnabled()) {
+    return readLocalArtifact<MonitorDiffArtifact>(key);
+  }
   if (!key || !config.GCS_BUCKET_NAME) return null;
 
   const bucket = storage.bucket(config.GCS_BUCKET_NAME);

@@ -1,4 +1,5 @@
 import { generateText } from "ai";
+import { callLocalMonitorJudge } from "../../lib/local-monitor-judge";
 import type { Logger } from "winston";
 import { withUsageTelemetry } from "../../lib/ai-usage-telemetry";
 import { isZeroDataRetentionActive } from "../../lib/otel-tracer";
@@ -147,6 +148,9 @@ async function callGemini(args: {
   labels?: LlmUsageLabels;
   zeroDataRetention?: boolean;
 }): Promise<{ text: string }> {
+  if (process.env.SELF_HOSTED_JUDGE_SOCKET) {
+    return callLocalMonitorJudge(SYSTEM_PROMPT, args.userBlock);
+  }
   let lastError: unknown;
   for (let attempt = 1; attempt <= JUDGE_MAX_ATTEMPTS; attempt++) {
     const controller = new AbortController();

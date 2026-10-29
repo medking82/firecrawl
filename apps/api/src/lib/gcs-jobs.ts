@@ -13,6 +13,7 @@ import type {
 import { config } from "../config";
 import crypto from "crypto";
 import { Logger } from "winston";
+import { localArtifactsEnabled, readLocalArtifact, removeLocalArtifact, writeLocalArtifact } from "./local-artifacts";
 
 const credentials = config.GCS_CREDENTIALS
   ? JSON.parse(atob(config.GCS_CREDENTIALS))
@@ -103,6 +104,12 @@ async function saveJobToGCS(params: {
         "job.num_docs": params.num_docs,
       });
 
+      if (localArtifactsEnabled()) {
+        if (!params.zeroDataRetention) {
+          await writeLocalArtifact(`jobs/${idToFilename(params.id)}`, params.data);
+        }
+        return;
+      }
       if (!config.GCS_BUCKET_NAME) {
         setSpanAttributes(span, { "gcs.bucket_configured": false });
         return;
@@ -385,6 +392,9 @@ export async function saveLlmsTxtToGCS(
 }
 
 export async function getJobFromGCS(jobId: string): Promise<Document[] | null> {
+  if (localArtifactsEnabled()) {
+    return readLocalArtifact<Document[]>(`jobs/${idToFilename(jobId)}`);
+  }
   return await withSpan("firecrawl-gcs-get-job", async span => {
     setSpanAttributes(span, {
       "gcs.operation": "get_job",
@@ -428,6 +438,10 @@ export async function removeJobFromGCS(
   jobId: string,
   _logger: Logger = logger,
 ): Promise<void> {
+  if (localArtifactsEnabled()) {
+    await removeLocalArtifact(`jobs/${idToFilename(jobId)}`);
+    return;
+  }
   return await withSpan("firecrawl-gcs-remove-job", async span => {
     setSpanAttributes(span, {
       "gcs.operation": "remove_job",
