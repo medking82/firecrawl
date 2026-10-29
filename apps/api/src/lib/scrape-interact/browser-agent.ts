@@ -6,6 +6,7 @@ import { logger as _logger } from "../logger";
 import { getModel } from "../generic-ai";
 import { executeHangarBrowser, BrowserExecutionResult } from "../hangar";
 import { config } from "../../config";
+import { executeLocalBrowserAgent } from "../local-browser-agent";
 import {
   generateText,
   buildLangSmithProviderOptions,
@@ -184,6 +185,7 @@ async function takeSnapshot(browserId: string): Promise<string> {
 
 /** Align the CLI with the replay's page without discarding the user's other tabs. */
 export async function selectBrowserAgentTab(browserId: string): Promise<void> {
+  if (process.env.SELF_HOSTED_BROWSER_LLM_SOCKET) return;
   const target = await executeHangarBrowser(browserId, {
     code: `await (async () => {
       for (const candidate of [page, ...context.pages().filter(p => p !== page)]) {
@@ -242,6 +244,8 @@ export async function executePromptViaBrowserAgent(
   logger: typeof _logger,
   trace?: BrowserAgentTraceContext,
 ): Promise<AgentResult> {
+  if (process.env.SELF_HOSTED_BROWSER_LLM_SOCKET)
+    return executeLocalBrowserAgent(prompt, browserId, stepTimeout);
   const zeroDataRetention = trace?.zeroDataRetention === true;
   const debugLog = new AgentDebugLog(browserId, zeroDataRetention);
   debugLog.add(`=== AGENT RUN ===`);

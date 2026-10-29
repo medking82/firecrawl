@@ -40,11 +40,11 @@ import { withZeroDataRetention } from "../../lib/otel-tracer";
 export const browserCreateRequestSchema = z.object({
   ttl: z.number().int().min(30).max(3600).default(600),
   activityTtl: z.number().int().min(10).max(3600).default(300),
-  streamWebView: z.boolean().default(true),
+  streamWebView: z.boolean().default(!process.env.SELF_HOSTED_BROWSER_SOCKET),
   recordSession: z.boolean().default(false),
   zeroDataRetention: z.boolean().optional(),
   integration: integrationSchema.optional().transform(value => value || null),
-  blockAds: z.boolean().default(true),
+  blockAds: z.boolean().default(!process.env.SELF_HOSTED_BROWSER_SOCKET),
   profile: z
     .object({
       name: browserProfileNameSchema,

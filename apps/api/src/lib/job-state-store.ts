@@ -4,6 +4,11 @@ import { saltedUuidV7RowKey } from "./bigtable-row-key";
 import { setSpanAttributes, withSpan } from "./otel-tracer";
 import type { ScrapeReplayContext } from "./scrape-interact/scrape-replay";
 import { type BrowserOptions, isBrowserOptions } from "./browser-options";
+import {
+  localBrowserJobStoreEnabled,
+  readLocalBrowserJob,
+  writeLocalBrowserJob,
+} from "./local-browser-job-store";
 
 const QUALIFIER = "v";
 const FAMILY = "s";
@@ -188,19 +193,35 @@ export function writeScrapeJobState(
   id: string,
   state: ScrapeJobState,
 ): Promise<boolean> {
+  const value = {
+    version: 1,
+    ...state,
+    ...(state.error ? { error: state.error.slice(0, MAX_ERROR_LENGTH) } : {}),
+  };
+  if (localBrowserJobStoreEnabled())
+    return writeLocalBrowserJob(
+      "scrape_state",
+      id,
+      value,
+      state.completedAtMs + STATE_RETENTION_MS,
+    );
   return writeState({
     id,
     tableId: config.BIGTABLE_SCRAPE_STATE_TABLE,
     spanName: "bigtable.scrape_state.write",
-    value: {
-      version: 1,
-      ...state,
-      ...(state.error ? { error: state.error.slice(0, MAX_ERROR_LENGTH) } : {}),
-    },
+    value,
   });
 }
 
 export function readScrapeJobState(id: string): Promise<ScrapeJobState | null> {
+  if (localBrowserJobStoreEnabled())
+    return readLocalBrowserJob("scrape_state", id).then(value => {
+      if (value === null) return null;
+      const state = parseScrapeState(value);
+      return state.completedAtMs + STATE_RETENTION_MS > Date.now()
+        ? state
+        : null;
+    });
   return readState({
     id,
     tableId: config.BIGTABLE_SCRAPE_STATE_TABLE,
