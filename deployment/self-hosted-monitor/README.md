@@ -23,8 +23,8 @@ It does not switch the existing Firecrawl deployment to DB authentication.
   change-tracking index write. The native monitor's own baseline stays intact.
 - Goal judging uses a private Unix socket to GA401's existing OpenCodex
   `claude-cli/claude-sonnet-5-5` route. That adapter disables CLI tools and MCP;
-  page text cannot execute CLI tools. No API key, provider account or model
-  workload is added. Existing subscription limits still apply. One judge runs
+  page text cannot execute CLI tools. No paid API key, provider account or local
+  GPU model is added. Existing CLI subscription limits still apply. One judge runs
   at a time; failures keep the native low-confidence fallback visible.
 - No Cloud Firecrawl fallback, paid API provider or GPU model is configured.
 
