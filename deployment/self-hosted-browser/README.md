@@ -79,6 +79,15 @@ retains stopped metadata receipts; there is no age-only sweep of service volumes
 
 ## Deployment And Validation
 
+For a manager-only patch, package its reviewed files and `manager-manifest.json`
+under a new `/home/marck/services/firecrawl-browser/manager-releases/<id>/` root.
+Run `activate-manager.py --expected-manager-sha256 <reviewed-current-hash>` from
+that release only after CI passes. It checks database/container/saved session state
+twice and defers if busy; never force activation over active sessions. It changes
+only the manager unit's executable path and restarts that manager while idle.
+The API, CLI bridge, databases, images and existing core/monitor services stay in
+place. `deployment.json` records separate `manager_release` and API `release` IDs.
+
 Package the reviewed source into a new immutable release. Run `python3 -B
 deployment/self-hosted-browser/deploy.py` on GA401 from that release. It snapshots
 all existing core/monitor image IDs and start times and production config hashes,
@@ -93,10 +102,19 @@ options, idle/hard TTL, aliases, scrape replay, real Codex-generated browser act
 post-action verification and idempotent cleanup. It cleans only its returned IDs
 and temporary tenant. Receipts are private under `shared/`.
 
+CDP TCP errors now clean up only that connection's Docker exec transport. They do
+not stop its browser container or restart the manager. `cdp-transport.test.cjs`
+uses actual TCP RST against the production upgrade handler in an isolated process
+and verifies the same peer transport remains alive and the reset transport exits.
+`cdp-rst-smoke.cjs` repeats the scenario with two actual authenticated browser
+sessions, a persistent peer CDP connection and a retained DOM proof marker; use
+`--remote` on GA401, or its Windows default through the two SSH tunnels.
+
 Focused contracts:
 
 ```text
 node --test deployment/self-hosted-browser/policy.test.cjs
+node --test deployment/self-hosted-browser/cdp-transport.test.cjs
 python3 -B -m unittest discover -s deployment/self-hosted-browser -p test_codex_browser.py
 python3 -B -m unittest discover -s deployment/self-hosted-monitor -p test_codex_judge.py
 ```

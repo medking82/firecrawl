@@ -110,6 +110,46 @@ function execute(s,body) {
     p.stdin.on('error',()=>{});p.stdin.end(body.code);
   });
 }
+// The HTTP upgrade transport is independently testable without starting Docker sessions.
+function createCdpServer(sessionMap = sessions, spawnProcess = spawn) {
+  const cdp=http.createServer((req,res)=>json(res,404,{error:'not_found'}));
+  cdp.on('upgrade',(req,client,head)=>{
+    let upstream,closed=false,killTimer;
+    const closeTransport=()=>{
+      if(closed)return;
+      closed=true;
+      client.destroy();
+      if(!upstream)return;
+      client.unpipe(upstream.stdin);
+      upstream.stdout.unpipe(client);
+      upstream.stdout.destroy();
+      // EOF ends only cdp-pipe.cjs, never the browser/session container.
+      upstream.stdin.end();
+      if(upstream.exitCode===null&&upstream.signalCode===null){
+        killTimer=setTimeout(()=>upstream.kill(),1000);
+        killTimer.unref();
+      }
+    };
+    // Install before authentication or piping: a tunnel can reset at any point.
+    client.on('error',closeTransport);
+    client.once('close',closeTransport);
+    client.once('end',closeTransport);
+    const m=req.url.match(/^\/cdp\/([a-f0-9]{64})(\/devtools\/browser\/[a-f0-9-]+)$/);
+    const s=m&&[...sessionMap.values()].find(s=>s.token===m[1]&&s.status==='running');
+    if(!s){client.end('HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n');return;}
+    upstream=spawnProcess('/usr/bin/docker',['exec','-i',s.name,'node','/opt/firecrawl-browser/cdp-pipe.cjs']);
+    upstream.stdin.on('error',closeTransport);
+    upstream.stdout.on('error',closeTransport);
+    upstream.on('error',closeTransport);
+    upstream.once('close',()=>{clearTimeout(killTimer);closeTransport();});
+    s.last=Date.now()/1000;
+    upstream.stdin.write(`GET ${m[2]} HTTP/1.1\r\n`+Object.entries(req.headers).map(([k,v])=>`${k}: ${k==='host'?'localhost:9222':v}`).join('\r\n')+'\r\n\r\n');
+    if(head.length)upstream.stdin.write(head);
+    client.pipe(upstream.stdin);upstream.stdout.pipe(client);
+    client.on('data',()=>s.last=Date.now()/1000);
+  });
+  return cdp;
+}
 async function main() {
   fs.mkdirSync(path.join(ROOT,'sessions'),{recursive:true,mode:0o700});
   fs.mkdirSync(path.join(ROOT,'egress'),{recursive:true,mode:0o700});
@@ -171,20 +211,7 @@ async function main() {
   });
   const sock=path.join(ROOT,'manager.sock');if(fs.existsSync(sock))fs.unlinkSync(sock);
   server.listen(sock,()=>fs.chmodSync(sock,0o600));
-  const cdp=http.createServer((req,res)=>json(res,404,{error:'not_found'}));
-  cdp.on('upgrade',(req,client,head)=>{
-    const m=req.url.match(/^\/cdp\/([a-f0-9]{64})(\/devtools\/browser\/[a-f0-9-]+)$/);
-    const s=m&&[...sessions.values()].find(s=>s.token===m[1]&&s.status==='running');
-    if(!s){client.end('HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n');return;}
-    const upstream=spawn('/usr/bin/docker',['exec','-i',s.name,'node','/opt/firecrawl-browser/cdp-pipe.cjs']);
-    s.last=Date.now()/1000;
-    upstream.stdin.write(`GET ${m[2]} HTTP/1.1\r\n`+Object.entries(req.headers).map(([k,v])=>`${k}: ${k==='host'?'localhost:9222':v}`).join('\r\n')+'\r\n\r\n');
-    if(head.length)upstream.stdin.write(head);
-    client.pipe(upstream.stdin);upstream.stdout.pipe(client);
-    upstream.stdin.on('error',()=>client.destroy());upstream.on('error',()=>client.destroy());
-    upstream.on('close',()=>client.destroy());client.on('close',()=>upstream.stdin.end());
-    client.on('data',()=>s.last=Date.now()/1000);
-  });
+  const cdp=createCdpServer();
   cdp.listen(3008,'127.0.0.1');
   setInterval(()=>{
     const now=Date.now()/1000;
@@ -196,4 +223,4 @@ async function main() {
   process.on('SIGTERM',()=>{for(const s of sessions.values())try{stop(s);}catch{} process.exit(0);});
 }
 if(require.main===module)main().catch(e=>{console.error(e.message);process.exit(1);});
-module.exports={publicIP};
+module.exports={publicIP,createCdpServer};
