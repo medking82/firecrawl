@@ -1,6 +1,16 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, resolve, sep } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+
+export function localJobArtifactKey(id: string): string {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+    throw new Error("Invalid local snapshot job ID");
+  }
+  const compact = id.replace(/-/g, "");
+  const hashed = compact[12] === "7" && parseInt(compact.slice(0, 12), 16) >= Date.UTC(2026, 4, 26);
+  const filename = hashed ? `${createHash("sha256").update(id).digest("hex")}-${id}` : id;
+  return `jobs/${filename}.json`;
+}
 
 // Opt-in retained storage for isolated self-hosted deployments. No Cloud request.
 export function localArtifactsEnabled(): boolean {

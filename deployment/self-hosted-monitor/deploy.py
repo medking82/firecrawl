@@ -61,6 +61,7 @@ else: raise RuntimeError('Isolated PostgreSQL readiness timeout')
 compose('exec','-T','app-db','psql','-X','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1',
         input=(SOURCE/'apps/nuq-postgres/nuq.sql').read_text())
 psql((HERE/'001-monitor.sql').read_text())
+psql((HERE/'002-artifact-gc.sql').read_text())
 clients=STATE/'client.json'
 if not clients.exists():
     test_sql=(HERE/'test-db.sql').read_text()
@@ -97,7 +98,6 @@ After=opencodex-proxy.service
 Type=simple
 ExecStart=/usr/bin/python3 -B {HERE}/judge-bridge.py
 Environment=MONITOR_JUDGE_SOCKET={socket_dir}/judge.sock
-Environment=MONITOR_JUDGE_MODEL=claude-cli/claude-sonnet-5-5
 UMask=0077
 Restart=on-failure
 RestartSec=10
@@ -120,6 +120,28 @@ for _ in range(60):
 if not ready:
     compose('stop','api')
     raise RuntimeError('Monitor API readiness timeout; isolated API stopped, production remains unchanged')
+prune_unit=Path('/home/marck/.config/systemd/user/firecrawl-monitor-prune.service')
+prune_unit.write_text('''[Unit]
+Description=Firecrawl Monitor Retention Pruning
+After=docker.service
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker exec firecrawl-monitor-api-1 node /app/monitor-prune.cjs
+TimeoutStartSec=120
+NoNewPrivileges=true
+''')
+Path('/home/marck/.config/systemd/user/firecrawl-monitor-prune.timer').write_text('''[Unit]
+Description=Hourly Firecrawl Monitor Retention Pruning
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=120
+Persistent=true
+Unit=firecrawl-monitor-prune.service
+[Install]
+WantedBy=timers.target
+''')
+run(['systemctl','--user','daemon-reload'])
+run(['systemctl','--user','enable','--now','firecrawl-monitor-prune.timer'])
 for name,expected in baseline.items():
     if name=='containers':continue
     assert hashlib.sha256((production/name).read_bytes()).hexdigest()==expected, 'Production config changed: '+name
