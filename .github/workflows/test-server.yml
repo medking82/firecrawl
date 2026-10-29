@@ -97,7 +97,9 @@ jobs:
 
       - name: Run CDP TCP reset transport regression
         if: matrix.engine == 'fetch' && matrix.proxy == 'no-proxy' && matrix.nuq == 'postgres'
-        run: node --test deployment/self-hosted-browser/cdp-transport.test.cjs
+        run: |
+          node --test deployment/self-hosted-browser/cdp-transport.test.cjs
+          python3 -B -m unittest discover -s deployment/self-hosted-browser -p 'test_activation.py'
 
       - run: pnpm fetch
         working-directory: apps/api

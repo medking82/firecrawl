@@ -54,6 +54,9 @@ function socketRequest(s, endpoint) {
   return Promise.resolve(JSON.parse(docker(['exec',s.name,'node','-e',`fetch('http://127.0.0.1:9222${endpoint}').then(r=>r.text()).then(console.log).catch(()=>process.exit(1))`])));
 }
 async function create(body,key) {
+  // Activation owns this marker through the final idle check and restart.
+  if(fs.existsSync(path.join(ROOT,'admission-paused')))
+    throw Object.assign(new Error('session_admission_paused'),{status:503});
   if (!key || typeof body.owner !== 'string') throw Object.assign(new Error('owner_and_idempotency_required'),{status:400});
   const previous=keys.get(body.owner+':'+key);
   if (previous) {
@@ -223,4 +226,4 @@ async function main() {
   process.on('SIGTERM',()=>{for(const s of sessions.values())try{stop(s);}catch{} process.exit(0);});
 }
 if(require.main===module)main().catch(e=>{console.error(e.message);process.exit(1);});
-module.exports={publicIP,createCdpServer};
+module.exports={publicIP,createCdpServer,create};

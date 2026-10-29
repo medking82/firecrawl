@@ -27,6 +27,24 @@ if(process.argv.includes('--fixture')) {
   process.on('exit',()=>{for(const child of children)child.kill();});
   process.on('message',message=>{if(message==='stop'){for(const child of children)child.kill();server.close();process.exit(0);}});
 } else {
+  test('activation admission gate survives process startup and rejects before allocating a session',()=>{
+    const fs=require('node:fs'),path=require('node:path');
+    const root=fs.mkdtempSync(path.join(require('node:os').tmpdir(),'cdp-admission-'));
+    fs.mkdirSync(path.join(root,'sessions'));fs.writeFileSync(path.join(root,'admission-paused'),'reviewed-release');
+    try{
+      const code=`const assert=require('node:assert/strict'),fs=require('node:fs');const {create}=require(${JSON.stringify(require.resolve('./manager.cjs'))});(async()=>{
+        await assert.rejects(create({owner:'test',max_lifetime_seconds:60,idle_timeout_seconds:30},'owned'),e=>e.status===503);
+        assert.deepEqual(fs.readdirSync(process.env.BROWSER_STATE_DIR+'/sessions'),[]);
+        fs.unlinkSync(process.env.BROWSER_STATE_DIR+'/admission-paused');
+        await assert.rejects(create({},''),e=>e.status===400);
+      })().catch(e=>{console.error(e);process.exitCode=1});`;
+      const result=require('node:child_process').spawnSync(process.execPath,['-e',code],{env:{...process.env,BROWSER_STATE_DIR:root},encoding:'utf8',timeout:5000,windowsHide:true});
+      assert.equal(result.status,0,result.stdout+result.stderr);
+    }finally{
+      const gate=path.join(root,'admission-paused');if(fs.existsSync(gate))fs.unlinkSync(gate);
+      fs.rmdirSync(path.join(root,'sessions'));fs.rmdirSync(root);
+    }
+  });
   async function fixture(t) {
     const child=spawn(process.execPath,[__filename,'--fixture'],{stdio:['ignore','pipe','pipe','ipc'],windowsHide:true});
     const messages=[];let stderr='';child.stderr.on('data',x=>stderr+=x);
