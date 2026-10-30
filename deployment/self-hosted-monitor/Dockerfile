@@ -14,5 +14,6 @@ COPY deployment/self-hosted-monitor/prune.cjs /app/monitor-prune.cjs
 COPY deployment/self-hosted-monitor/retention.test.cjs /app/monitor-retention.test.cjs
 COPY deployment/self-hosted-monitor/001-monitor.sql /app/monitor-db/001-monitor.sql
 COPY deployment/self-hosted-monitor/002-artifact-gc.sql /app/monitor-db/002-artifact-gc.sql
+COPY deployment/self-hosted-monitor/003-agent-sponsors.sql /app/monitor-db/003-agent-sponsors.sql
 RUN node --test /app/monitor-storage.test.cjs
 CMD ["node", "dist/src/harness.js", "--start-docker"]

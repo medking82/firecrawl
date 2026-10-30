@@ -62,6 +62,7 @@ compose('exec','-T','app-db','psql','-X','-U','postgres','-d','postgres','-v','O
         input=(SOURCE/'apps/nuq-postgres/nuq.sql').read_text())
 psql((HERE/'001-monitor.sql').read_text())
 psql((HERE/'002-artifact-gc.sql').read_text())
+psql((HERE/'003-agent-sponsors.sql').read_text())
 clients=STATE/'client.json'
 if not clients.exists():
     test_sql=(HERE/'test-db.sql').read_text()
