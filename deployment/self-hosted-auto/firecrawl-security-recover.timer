@@ -1,0 +1,10 @@
+[Unit]
+Description=Recover Firecrawl after reboot or an interrupted security update
+
+[Timer]
+OnBootSec=30s
+OnUnitInactiveSec=1min
+Unit=firecrawl-security-recover.service
+
+[Install]
+WantedBy=timers.target

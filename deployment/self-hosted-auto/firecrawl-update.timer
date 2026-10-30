@@ -1,0 +1,11 @@
+[Unit]
+Description=Security refresh for all three Firecrawl images every six hours
+
+[Timer]
+OnBootSec=10min
+OnUnitInactiveSec=6h
+RandomizedDelaySec=15min
+Unit=firecrawl-update.service
+
+[Install]
+WantedBy=timers.target

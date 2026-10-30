@@ -1,0 +1,10 @@
+[Unit]
+Description=Check for changed Firecrawl security alerts
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=10min
+Unit=firecrawl-security-notify.service
+
+[Install]
+WantedBy=timers.target

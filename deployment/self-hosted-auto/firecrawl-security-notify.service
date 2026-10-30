@@ -1,0 +1,10 @@
+[Unit]
+Description=Persist and deliver changed Firecrawl security and updater alerts locally
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=/usr/bin/python3 -B %h/.local/lib/firecrawl-security-refresh/deployment/firecrawl-updater/notify.py --record-only --updater-report %h/.local/state/firecrawl-security-refresh/latest.json
+SuccessExitStatus=1
+TimeoutStartSec=1min
+NoNewPrivileges=yes

@@ -1,0 +1,9 @@
+[Unit]
+Description=Recover interrupted Firecrawl image-only security transactions
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=/usr/bin/python3 -B %h/.local/lib/firecrawl-security-refresh/deployment/self-hosted-auto/security_refresh.py --recover
+TimeoutStartSec=15min
+NoNewPrivileges=yes

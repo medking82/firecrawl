@@ -1,0 +1,9 @@
+[Unit]
+Description=Guarded image-only security updates for all three Firecrawl services
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=/usr/bin/python3 -B %h/.local/lib/firecrawl-security-refresh/deployment/self-hosted-auto/security_refresh.py
+TimeoutStartSec=90min
+NoNewPrivileges=yes
