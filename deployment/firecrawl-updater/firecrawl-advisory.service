@@ -1,0 +1,11 @@
+[Unit]
+Description=Independent Firecrawl image advisory scan
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=/usr/bin/python3 %h/.local/lib/firecrawl-advisory/advisory_owner.py
+SuccessExitStatus=1
+TimeoutStartSec=1h
+NoNewPrivileges=yes
+

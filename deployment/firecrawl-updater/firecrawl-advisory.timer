@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily independent Firecrawl image advisory scan
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=30m
+Unit=firecrawl-advisory.service
+
+[Install]
+WantedBy=timers.target
