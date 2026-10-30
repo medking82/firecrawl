@@ -42,11 +42,16 @@ class CandidateTests(unittest.TestCase):
                 ['private_bypass_absent_or_empty','db_auth_canonical_false','dotenv_absent',
                  'alternate_dotenv_unconfigured','expected_working_directory','node_options_unconfigured'], True)}
         self.config = {'name':'firecrawl','services':{'api':{'build':{'context':'candidate'},
-            'environment':{'USE_DB_AUTHENTICATION':'false','PLAYWRIGHT_MICROSERVICE_URL':'http://fixture'}}}}
+            'environment':{'USE_DB_AUTHENTICATION':'false','PLAYWRIGHT_MICROSERVICE_URL':'http://fixture'}},
+            'nuq-postgres':{}, 'playwright-service':{}}}
         self.packages = {'decode-uri-component':[{'location':'/app/a','version':'0.5.1'}], 'systeminformation':[{'location':'/app/b','version':'5.33.18'}]}
         self.metadata = {'Env':[], 'Cmd':['node','dist/src/harness.js','--start-docker'],
             'Entrypoint':['docker-entrypoint.sh'],'WorkingDir':'/app','User':''}
         self.evidence = self.root / 'evidence'; self.evidence.mkdir()
+        self.preimage = self.root / 'preimage'; self.preimage.mkdir()
+        (self.preimage / 'compose-images.json').write_text(json.dumps({'services': {
+            'nuq-postgres': {'image': 'sha256:'+'d'*64, 'pull_policy':'never'},
+            'playwright-service': {'image': 'sha256:'+'e'*64, 'pull_policy':'never'}}}))
         self.fixture = self.root / 'fixture.json'
         self.write_fixture()
         docker = self.root / 'docker'
@@ -55,7 +60,10 @@ from pathlib import Path
 p=Path(os.environ['CANDIDATE_FIXTURE']); data=json.loads(p.read_text()); args=sys.argv[1:]
 with p.with_suffix('.calls').open('a') as log: log.write(json.dumps(args)+'\\n')
 if args[:2]==['compose','--project-name'] or args[:2]==['compose','config']: print(json.dumps(data['config']))
-elif args[:2]==['image','inspect']: print(json.dumps([{'Id':'sha256:'+'a'*64,'Config':data['metadata']}]))
+elif args[:2]==['image','inspect']: print(json.dumps([{'Id':args[2] if args[2].startswith('sha256:') else 'sha256:'+'a'*64,'Config':data['metadata']}]))
+elif args[:2]==['inspect','--format'] and args[-1] in ('firecrawl-nuq-postgres-1','firecrawl-playwright-service-1'):
+ name='nuq-postgres' if args[-1]=='firecrawl-nuq-postgres-1' else 'playwright-service'
+ print(json.dumps({'image':'sha256:'+('d' if name=='nuq-postgres' else 'e')*64,'service':name,'project':'firecrawl'}))
 elif args[:2]==['run','--rm']: print(json.dumps(data['packages']))
 elif args[:2]==['run','-d']: print('b'*64)
 elif args[0]=='inspect': print(json.dumps({'id':'b'*64,'image':'sha256:'+'a'*64,'running':True}))
@@ -77,7 +85,7 @@ else: raise SystemExit('unexpected Docker action')
 
     def manifest(self):
         self.write_fixture()
-        return subprocess.run([sys.executable,'-B','-c',embedded('PYMANIFEST'),str(self.evidence),str(self.guard),self.guard_hash,'c'*40,self.checks_hash],env=self.env,capture_output=True,text=True,timeout=30)
+        return subprocess.run([sys.executable,'-B','-c',embedded('PYMANIFEST'),str(self.evidence),str(self.guard),self.guard_hash,'c'*40,self.checks_hash,str(self.preimage)],env=self.env,capture_output=True,text=True,timeout=30)
 
     def test_exact_reviewed_profile_pins_images_only_after_recheck(self):
         result=self.candidate(); self.assertEqual(result.returncode,0,result.stderr)
@@ -85,10 +93,23 @@ else: raise SystemExit('unexpected Docker action')
         result=self.manifest(); self.assertEqual(result.returncode,0,result.stderr)
         manifest=json.loads((self.evidence/'manifest.json').read_text())
         self.assertEqual(manifest['images']['api']['image'],'sha256:'+'a'*64)
+        self.assertEqual(manifest['images']['nuq-postgres']['image'],'sha256:'+'d'*64)
+        self.assertEqual(manifest['images']['playwright-service']['image'],'sha256:'+'e'*64)
         calls=[json.loads(line) for line in self.fixture.with_suffix('.calls').read_text().splitlines()]
         probe=next(row for row in calls if row[:2]==['run','-d'])
         self.assertIn('none',probe); self.assertIn('--read-only',probe)
         self.assertFalse(any('up' in row or 'build' in row for row in calls))
+
+    def test_changed_protected_image_rejects_cutover(self):
+        self.assertEqual(self.candidate().returncode, 0)
+        path = self.preimage / 'compose-images.json'
+        value = json.loads(path.read_text())
+        value['services']['nuq-postgres']['image'] = 'sha256:'+'f'*64
+        path.write_text(json.dumps(value))
+        result = self.manifest()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Protected recovery image changed', result.stderr)
+        self.assertFalse((self.evidence/'manifest.json').exists())
 
     def test_changed_hash_cannot_publish_manifest(self):
         self.probe['hashes']['/app/dist/src/lib/exchange.js']='f'*64

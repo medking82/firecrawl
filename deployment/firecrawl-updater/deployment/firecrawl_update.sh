@@ -403,9 +403,19 @@ report = {'schema':1,'status':'blocked','tag':tag,'source_commit':commit}
 identity = None
 try:
     config = json.loads(run(compose+['config','--format','json']))
+    protected = {'nuq-postgres': 'firecrawl-nuq-postgres-1',
+                 'playwright-service': 'firecrawl-playwright-service-1'}
+    if not set(protected).issubset(config['services']): raise ValueError('protected_service_missing')
     images = {}
     for name, service in config['services'].items():
-        image = patched_image if name == 'api' else service.get('image') or 'firecrawl-'+name
+        if name in protected:
+            fmt = '{"image":{{json .Image}},"service":{{json (index .Config.Labels "com.docker.compose.service")}},"project":{{json (index .Config.Labels "com.docker.compose.project")}}}'
+            current = json.loads(run(['docker','inspect','--format',fmt,protected[name]]))
+            if current.get('service') != name or current.get('project') != 'firecrawl': raise ValueError('protected_service_identity')
+            image = current.get('image')
+            if not isinstance(image,str) or not re.fullmatch(r'sha256:[0-9a-f]{64}',image): raise ValueError('protected_image_identity')
+        else:
+            image = patched_image if name == 'api' else service.get('image') or 'firecrawl-'+name
         value = json.loads(run(['docker','image','inspect',image]))[0]
         if not re.fullmatch(r'sha256:[0-9a-f]{64}',value['Id']): raise ValueError('image_identity')
         images[name] = {'image':value['Id'],'pull_policy':'never'}
@@ -496,7 +506,7 @@ PYCANDIDATE
 }
 
 verify_candidate_manifest() {
-  python3 -B - "$candidate_evidence" "$guard_file" "$guard_sha256" "$latest_commit" "$candidate_checks_sha256" <<'PYMANIFEST'
+  python3 -B - "$candidate_evidence" "$guard_file" "$guard_sha256" "$latest_commit" "$candidate_checks_sha256" "$preimage" <<'PYMANIFEST'
 import hashlib, json, subprocess, sys
 from pathlib import Path
 root, guard, expected, commit = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3], sys.argv[4]
@@ -509,6 +519,10 @@ for service in config['services'].values(): service.pop('build',None)
 if hashlib.sha256(json.dumps(config,sort_keys=True,separators=(',',':')).encode()).hexdigest()!=report['runtime_config_sha256']: raise SystemExit('Candidate runtime configuration changed')
 images=json.loads((root/'images.json').read_text())
 if images!={'services':report['images']}: raise SystemExit('Candidate image manifest changed')
+previous=json.loads((Path(sys.argv[6])/'compose-images.json').read_text())['services']
+for name in ('nuq-postgres','playwright-service'):
+    if name not in previous or previous[name] != images['services'].get(name):
+        raise SystemExit('Protected recovery image changed before cutover')
 package_check=report.get('package_check')
 if (not isinstance(package_check,dict) or package_check.get('api_image')!=report['images']['api']['image']
         or set(package_check.get('packages',{}))!={'decode-uri-component','systeminformation'}
@@ -546,7 +560,8 @@ def baseline_files(paths):
         overlay = Path(paths[2])
         state = Path('/home/marck/.local/state/firecrawl-updater')
         if (overlay.parent.parent != state or not overlay.parent.name.startswith('candidate.')
-                or overlay.name != 'images.json' or any(p.is_symlink() for p in (overlay, *overlay.parents))):
+                or not (overlay.name == 'images.json' or re.fullmatch(r'images\.candidate-patch-promotion-[0-9a-f]{32}\.json', overlay.name))
+                or any(p.is_symlink() for p in (overlay, *overlay.parents))):
             raise SystemExit('Unsupported Compose image overlay')
         value = json.loads(overlay.read_bytes())
         if (set(value) != {'services'} or not isinstance(value['services'], dict) or not value['services']

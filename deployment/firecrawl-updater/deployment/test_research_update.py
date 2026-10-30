@@ -52,8 +52,9 @@ class ResearchUpdaterTests(unittest.TestCase):
             namespace={'Path':Path,'json':json,'re':re}
             exec(source,namespace)
             base=[str(root/name) for name in ('docker-compose.yaml','docker-compose.override.yaml')]
-            for name in ('candidate.old','candidate.new'):
-                folder=state/name;folder.mkdir(); overlay=folder/'images.json'
+            for name,filename in (('candidate.old','images.json'),
+                                  ('candidate.new','images.candidate-patch-promotion-'+'c'*32+'.json')):
+                folder=state/name;folder.mkdir(); overlay=folder/filename
                 overlay.write_text(json.dumps({'services':{'api':{'image':'sha256:'+'a'*64,'pull_policy':'never'}}}))
                 with patch.object(Path,'cwd',return_value=root):
                     self.assertEqual(namespace['baseline_files'](base+[str(overlay)]),base)
