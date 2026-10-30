@@ -30,15 +30,28 @@ class BrowserUpgradeContracts(unittest.TestCase):
 
     def test_lineage_and_env_require_exact_images(self):
         imgs={u.BASE_IMAGE:{'Id':u.BASE_IMAGE,'RootFS':{'Layers':['a','b']}},u.EXPECTED:{'Id':u.EXPECTED,'RootFS':{'Layers':['a','b','c']}}}
-        u.verify_lineage(u.CURRENT_IMAGE,u.BASE_IMAGE,imgs.__getitem__)
+        u.verify_lineage(u.CURRENT_IMAGE,u.CURRENT_CORE,imgs.__getitem__)
         imgs[u.EXPECTED]['RootFS']['Layers']=['a','c']
-        with self.assertRaises(u.p.Stop):u.verify_lineage(u.CURRENT_IMAGE,u.BASE_IMAGE,imgs.__getitem__)
+        with self.assertRaises(u.p.Stop):u.verify_lineage(u.CURRENT_IMAGE,u.CURRENT_CORE,imgs.__getitem__)
         raw=('SECRET=a=b\nBASE_API='+u.CURRENT_BASE+'\nBROWSER_API_IMAGE='+u.CURRENT_IMAGE+'\n').encode()
         result=u.proposed_env(raw)
         self.assertIn(('BASE_API='+u.BASE_IMAGE).encode(),result)
         self.assertIn(('BROWSER_API_IMAGE='+u.EXPECTED).encode(),result)
         self.assertTrue(result.startswith(b'SECRET=a=b\n'))
         with self.assertRaises(u.p.Stop):u.proposed_env(raw.replace(u.CURRENT_BASE.encode(),b'old'))
+
+    def test_running_core_requires_exact_config_rootfs_and_build_equivalence(self):
+        images={u.BASE_IMAGE:{'Id':u.BASE_IMAGE,'RootFS':{'Type':'layers','Layers':['a','b']},'Config':{'Env':['X=1']}},
+                u.CURRENT_CORE:{'Id':u.CURRENT_CORE,'RootFS':{'Type':'layers','Layers':['a','b']},'Config':{'Env':['X=1']}}}
+        proof=u.verify_core_equivalence(images.__getitem__,lambda _:u.BUILD)
+        self.assertEqual(proof['running_core'],u.CURRENT_CORE)
+        self.assertEqual(proof['reviewed_base'],u.BASE_IMAGE)
+        for field in ('Config','RootFS'):
+            changed=copy.deepcopy(images);changed[u.CURRENT_CORE][field]={'different':True}
+            with self.subTest(field=field),self.assertRaises(u.p.Stop):u.verify_core_equivalence(changed.__getitem__,lambda _:u.BUILD)
+        with self.assertRaises(u.p.Stop):u.verify_core_equivalence(images.__getitem__,lambda image:u.BUILD if image==u.BASE_IMAGE else 'wrong')
+        changed=copy.deepcopy(images);changed[u.CURRENT_CORE]['Id']='wrong'
+        with self.assertRaises(u.p.Stop):u.verify_core_equivalence(changed.__getitem__,lambda _:u.BUILD)
 
     def test_only_reviewed_image_configuration_differences_allowed(self):
         labels={'org.firecrawl.patch.base':'base','org.firecrawl.patch.base-image-id':'id'}

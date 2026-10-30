@@ -19,6 +19,7 @@ from recovery_backup import verify_backup
 
 EXPECTED = 'sha256:e97dde38a74efbbbcc487a4d99e90a12bab8f8000c4c7759d6cbeabc1e9a409d'
 BASE_IMAGE = 'sha256:b967b93629d2a1c2a46ab160058f29f5d23ae67e6e8b3880656ec4d0f8d78cfd'
+CURRENT_CORE = 'sha256:ea19422d7a62e0a7421f56e52878aaa023c8c829f0470bfdc85acf15865988b6'
 CURRENT_IMAGE = 'sha256:f7df127568145a769bbb5c37933c218d9be5b59697b7ad7311829dc9ea6909a4'
 CURRENT_BASE = 'sha256:394360309d3cfc655d1cc4802f2886c3e779da90637f6dbe99b2859461de2071'
 BUILD = '74f81da6935bcbf581480a888c2ed3fd81fc2d85'
@@ -49,12 +50,33 @@ def require_healthy(snapshot):
             raise p.Stop('container is not healthy: '+name)
 
 def verify_lineage(current, core, image_lookup):
-    if current != CURRENT_IMAGE or core != BASE_IMAGE: raise p.Stop('running image preimage changed')
+    if current != CURRENT_IMAGE or core != CURRENT_CORE: raise p.Stop('running image preimage changed')
     base = image_lookup(BASE_IMAGE); candidate = image_lookup(EXPECTED)
     if base.get('Id') != BASE_IMAGE or candidate.get('Id') != EXPECTED: raise p.Stop('image ID mismatch')
     a = base.get('RootFS',{}).get('Layers'); b = candidate.get('RootFS',{}).get('Layers')
     if not isinstance(a,list) or not a or not isinstance(b,list) or len(b)<=len(a) or b[:len(a)]!=a:
         raise p.Stop('browser candidate does not extend the reviewed core')
+
+def verify_core_equivalence(image_lookup, build_lookup):
+    """Accept only the two pinned images with identical runtime configuration and bytes."""
+    base=image_lookup(BASE_IMAGE); current=image_lookup(CURRENT_CORE)
+    if base.get('Id')!=BASE_IMAGE or current.get('Id')!=CURRENT_CORE:
+        raise p.Stop('core equivalence image identity changed')
+    root=base.get('RootFS');config=base.get('Config')
+    if not isinstance(root,dict) or not root.get('Layers') or root!=current.get('RootFS'):
+        raise p.Stop('core root filesystem differs from reviewed base')
+    if not isinstance(config,dict) or config!=current.get('Config'):
+        raise p.Stop('core configuration differs from reviewed base')
+    if build_lookup(BASE_IMAGE)!=BUILD or build_lookup(CURRENT_CORE)!=BUILD:
+        raise p.Stop('core build revision differs from reviewed base')
+    digest=lambda value:hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+    return {'reviewed_base':BASE_IMAGE,'running_core':CURRENT_CORE,'build_sha':BUILD,
+            'rootfs_sha256':digest(root),'config_sha256':digest(config)}
+
+def image_build(image):
+    return p.run(['docker','run','--rm','--pull=never','--network','none','--read-only',
+                  '--label','com.docker.compose.project=browser-core-audit',
+                  '--entrypoint','cat',image,'/app/BUILD_SHA'],timeout=30)
 
 def env_map(config):
     out={}
@@ -111,11 +133,12 @@ def preflight(backup, max_age):
     if browser.get('envfile') and Path(browser['envfile']) != ENV: raise p.Stop('unexpected browser env owner')
     current=browser['services']['api']; core_api=core['services']['api']
     verify_lineage(current['Image'],core_api['Image'],lambda ref:p.inspect('image',ref))
+    core_equivalence=verify_core_equivalence(lambda ref:p.inspect('image',ref),image_build)
     old_image=p.inspect('image',CURRENT_IMAGE);new_image=p.inspect('image',EXPECTED)
     verify_image_configuration(old_image,new_image);verify_current_image_configuration(current,old_image)
     raw=ENV.read_bytes(); updated=proposed_env(raw)
     return {'status':'prepared-not-admitted','backup':backup_evidence,'candidate':EXPECTED,
-            'base':BASE_IMAGE,'build':BUILD,'current':logical_snapshot(browser),
+            'base':BASE_IMAGE,'build':BUILD,'core_equivalence':core_equivalence,'current':logical_snapshot(browser),
             'runtime_env_sha256':hashlib.sha256(raw).hexdigest(),
             'proposed_env_sha256':hashlib.sha256(updated).hexdigest()}
 
@@ -232,6 +255,7 @@ def upgrade(backup,max_age,manifest,manifest_sha,guard,guard_sha):
         if not db['State']['Running']: raise p.Stop('browser database is not running')
         if snapshot.get('envfile') and Path(snapshot['envfile'])!=ENV: raise p.Stop('unexpected browser environment owner')
         verify_lineage(current['Image'],core['services']['api']['Image'],lambda ref:p.inspect('image',ref))
+        core_equivalence=verify_core_equivalence(lambda ref:p.inspect('image',ref),image_build)
         old_image=p.inspect('image',CURRENT_IMAGE);new_image=p.inspect('image',EXPECTED)
         verify_image_configuration(old_image,new_image);verify_current_image_configuration(current,old_image)
         source_digest=checked_manifest(manifest,manifest_sha)
@@ -260,7 +284,7 @@ def upgrade(backup,max_age,manifest,manifest_sha,guard,guard_sha):
         receipt_dir=p.UPDATER/('browser-v629-'+uuid.uuid4().hex);receipt_dir.mkdir(mode=0o700)
         p.atomic_write(receipt_dir/'runtime.env.before',raw)
         record={'status':'preflight','backup':backup_evidence,'before':before,'candidate':EXPECTED,'base':BASE_IMAGE,
-                'manifest_sha256':source_digest,'schema_sha256':schema_sha,'package_audit':packages,
+                'manifest_sha256':source_digest,'schema_sha256':schema_sha,'package_audit':packages,'core_equivalence':core_equivalence,
                 'env_sha256':hashlib.sha256(raw).hexdigest(),'compose_sha256':files,'unit_sha256':unit_hashes}
         def save():p.atomic_write(receipt_dir/'receipt.json',json.dumps(record,indent=2).encode())
         save();gate=p.BROWSER/'admission-paused'; frozen=False; paused=False; success=False; watchdog=None
@@ -279,6 +303,9 @@ def upgrade(backup,max_age,manifest,manifest_sha,guard,guard_sha):
             if any(hashlib.sha256(Path(k).read_bytes()).hexdigest()!=v for k,v in unit_hashes.items()):raise p.Stop('browser unit changed')
             if any(hashlib.sha256(Path(k).read_bytes()).hexdigest()!=v for k,v in files.items()):raise p.Stop('compose source changed')
             if checked_manifest(manifest,manifest_sha)!=source_digest:raise p.Stop('source binding changed')
+            if (p.project_snapshot('firecrawl')['services']['api']['Image']!=CURRENT_CORE or
+                verify_core_equivalence(lambda ref:p.inspect('image',ref),image_build)!=core_equivalence):
+                raise p.Stop('core equivalence changed during preflight')
             verify_image_configuration(p.inspect('image',CURRENT_IMAGE),p.inspect('image',EXPECTED))
             verify_current_image_configuration(current,p.inspect('image',CURRENT_IMAGE))
             record['status']='stopping-api';save();p.run(['docker','stop','--time','60',current['Id']],timeout=90)
