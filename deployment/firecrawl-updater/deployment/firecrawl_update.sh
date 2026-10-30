@@ -24,7 +24,14 @@ log() { printf '%s %s\n' "$(date --iso-8601=seconds)" "$*"; }
 
 # Embedded in the updater by build-updater.py. Caller holds updater run.lock.
 sync_fork_main() {
-  local sync_dir work_dir origin_ref upstream_ref origin_oid upstream_oid merged_oid remote_origin remote_upstream
+  local sync_dir work_dir origin_ref upstream_ref origin_oid upstream_oid merged_oid remote_origin remote_upstream prior
+  for prior in "$state_dir"/fork-sync.*; do
+    [[ -d "$prior/worktree" ]] || continue
+    if [[ ! -f "$prior/snapshots" ]] || ! grep -qx 'status=complete' "$prior/snapshots"; then
+      log "prior fork sync requires inspection; preserved $prior"
+      return 1
+    fi
+  done
   sync_dir=$(mktemp -d "$state_dir/fork-sync.XXXXXXXX") || return 1
   work_dir="$sync_dir/worktree"
   origin_ref="refs/firecrawl-updater/$(basename "$sync_dir")/origin"
@@ -53,7 +60,6 @@ sync_fork_main() {
   [[ -z $(git -C "$work_dir" status --porcelain --untracked-files=all) ]] || return 1
   git merge-base --is-ancestor "$origin_oid" "$merged_oid" || return 1
   git merge-base --is-ancestor "$upstream_oid" "$merged_oid" || return 1
-  git -C "$work_dir" diff --check "$origin_oid" "$merged_oid" || return 1
   printf 'merged=%s\n' "$merged_oid" >>"$sync_dir/snapshots"
   # Re-read both remote tips: a changed input requires a fresh run, never a force push.
   remote_origin=$(git ls-remote --exit-code origin refs/heads/main) || return 1

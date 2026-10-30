@@ -17,6 +17,7 @@ sys.path.insert(0, str(BASE.parent / 'patched-base'))
 import promote as p
 from recovery_backup import verify_backup
 from upgrade_state import stable_summary
+from upgrade_stop_candidate import stop_candidate
 
 PROJECT = 'firecrawl-monitor'
 EXPECTED = 'sha256:89b2bacf0c5f6d9a183d8f9f5ff9ff5ae64a1757b61fd5509990aa2f804398f4'
@@ -24,7 +25,7 @@ BASE_IMAGE = 'sha256:b967b93629d2a1c2a46ab160058f29f5d23ae67e6e8b3880656ec4d0f8d
 CURRENT_IMAGE = 'sha256:079ea46137172ec51f50d882beef02b0a7cd55408c9d87624f94f3c730ae94c3'
 CURRENT_BASE_REF = 'sha256:f4495407eea50a90846f4571f407253948e9be2eabfcc988f658bca1096417ff'
 GUARD_SHA = '07f73956c9531c483ccd9816af9b3aa06de87424dc0ab33758e9daa2c5e16c3d'
-UPDATER_SHA = '57570ee7ed0e99dd3e8ee9c6f5d23a438e425197f53edf469e4eba0fe02dfe37'
+UPDATER_SHA = 'b853b7a642a24238b0f9aa540263a9343d87e490e5e609a7271f29b3f918a664'
 TRANSPORT_SCRIPT_SHA = '558cb5d6354dcdbf7394e70d0f8130e9e43ee5c0fb312cf4b55dd6504f3d4f69'
 ENV = p.MONITOR / 'runtime.env'
 MIGRATION = BASE / '003-agent-sponsors.sql'
@@ -70,7 +71,7 @@ def env_map(config):
     return result
 
 
-def verify_api_configuration(before, after):
+def verify_image_configuration():
     old_image = p.inspect('image', CURRENT_IMAGE)['Config']
     new_image = p.inspect('image', EXPECTED)['Config']
     old_env, new_env = env_map(old_image), env_map(new_image)
@@ -82,6 +83,13 @@ def verify_api_configuration(before, after):
     allowed = set()
     if label_changes != allowed or any(k in new_labels for k in allowed):
         raise p.Stop('unreviewed image label difference')
+    return old_image, new_image
+
+
+def verify_api_configuration(before, after):
+    old_image, new_image = verify_image_configuration()
+    old_env, new_env = env_map(old_image), env_map(new_image)
+    old_labels, new_labels = old_image.get('Labels') or {}, new_image.get('Labels') or {}
     left, right = p.api_configuration(before), p.api_configuration(after)
     before_env, after_env = env_map(left['config']), env_map(right['config'])
     if before_env.get('FIRECRAWL_BUILD_SHA') != old_env['FIRECRAWL_BUILD_SHA'] or after_env.get('FIRECRAWL_BUILD_SHA') != new_env['FIRECRAWL_BUILD_SHA']:
@@ -92,6 +100,17 @@ def verify_api_configuration(before, after):
         if (before['Config'].get('Labels') or {}).get(key) != old_labels.get(key) or (after['Config'].get('Labels') or {}).get(key) != new_labels.get(key):
             raise p.Stop('container image label differs from reviewed image')
     if left != right: raise p.Stop('monitor API configuration changed')
+
+
+def verify_current_image_configuration(before, old_image):
+    expected = env_map(old_image)
+    actual = env_map(before['Config'])
+    if actual.get('FIRECRAWL_BUILD_SHA') != expected.get('FIRECRAWL_BUILD_SHA'):
+        raise p.Stop('current container build SHA differs from image')
+    labels = old_image.get('Labels') or {}
+    for key in ('org.firecrawl.patch.base', 'org.firecrawl.patch.base-image-id'):
+        if (before['Config'].get('Labels') or {}).get(key) != labels.get(key):
+            raise p.Stop('current container image label differs from image')
 
 
 def installed_package_audit():
@@ -146,6 +165,8 @@ def upgrade(backup, max_age, guard, guard_sha):
         stable_summary(p.summary(snapshot))
         for summary in before_others.values(): stable_summary(summary)
         verify_image_binding(current, other_snapshots['firecrawl']['services']['api'], EXPECTED)
+        old_image, _ = verify_image_configuration()
+        verify_current_image_configuration(current, old_image)
         env_bytes = ENV.read_bytes(); env_stat = ENV.stat()
         if hasattr(os, 'listxattr') and os.listxattr(ENV):
             raise p.Stop('runtime environment has unsupported extended attributes')
@@ -189,6 +210,7 @@ def upgrade(backup, max_age, guard, guard_sha):
         record['package_check'] = packages
         def save(): p.atomic_write(receipt_dir / 'receipt.json', json.dumps(record, indent=2).encode())
         save()
+        candidate_attempted = False
         try:
             deadline = time.monotonic() + 120
             consecutive = 0
@@ -220,6 +242,7 @@ def upgrade(backup, max_age, guard, guard_sha):
             if p.without_images(p.render(snapshot, envfile=ENV)) != p.without_images(config):
                 raise p.Stop('unexpected Compose configuration change')
             record['status'] = 'recreating-monitor-api'; save()
+            candidate_attempted = True
             p.compose(PROJECT, snapshot['paths'], snapshot['workdir'], ENV, 'up', '-d', '--no-deps',
                       '--no-build', '--pull', 'never', '--force-recreate', 'api')
             after = p.project_snapshot(PROJECT)
@@ -238,7 +261,14 @@ def upgrade(backup, max_age, guard, guard_sha):
             return receipt_dir / 'receipt.json'
         except Exception as exc:
             record['failure_stage'] = record['status']; record['status'] = 'failed-manual-intervention'
-            record['failure'] = str(exc) if isinstance(exc, p.Stop) else type(exc).__name__; save()
+            record['failure'] = str(exc) if isinstance(exc, p.Stop) else type(exc).__name__
+            if candidate_attempted:
+                try:
+                    record['candidate_cleanup'] = stop_candidate(p, EXPECTED)
+                except Exception as cleanup_exc:
+                    record['candidate_cleanup'] = 'failed'
+                    record['candidate_cleanup_error'] = str(cleanup_exc) if isinstance(cleanup_exc, p.Stop) else type(cleanup_exc).__name__
+            save()
             raise
 
 

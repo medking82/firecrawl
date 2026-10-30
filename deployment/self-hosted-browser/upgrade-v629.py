@@ -17,7 +17,7 @@ sys.path.insert(0, str(BASE.parent / 'patched-base'))
 import promote as p
 from recovery_backup import verify_backup
 
-EXPECTED = 'sha256:dafa957ae517bb089e6892dd323cd12e9afc471da3ecdae193bed6c6ec21cb7f'
+EXPECTED = 'sha256:e97dde38a74efbbbcc487a4d99e90a12bab8f8000c4c7759d6cbeabc1e9a409d'
 BASE_IMAGE = 'sha256:b967b93629d2a1c2a46ab160058f29f5d23ae67e6e8b3880656ec4d0f8d78cfd'
 CURRENT_IMAGE = 'sha256:f7df127568145a769bbb5c37933c218d9be5b59697b7ad7311829dc9ea6909a4'
 CURRENT_BASE = 'sha256:394360309d3cfc655d1cc4802f2886c3e779da90637f6dbe99b2859461de2071'
@@ -25,7 +25,7 @@ BUILD = '74f81da6935bcbf581480a888c2ed3fd81fc2d85'
 ENV = p.BROWSER / 'runtime.env'
 SCHEMA = BASE / '003-agent-sponsors.sql'
 GUARD_SHA='07f73956c9531c483ccd9816af9b3aa06de87424dc0ab33758e9daa2c5e16c3d'
-UPDATER_SHA='57570ee7ed0e99dd3e8ee9c6f5d23a438e425197f53edf469e4eba0fe02dfe37'
+UPDATER_SHA='b853b7a642a24238b0f9aa540263a9343d87e490e5e609a7271f29b3f918a664'
 TRANSPORT_SHA='558cb5d6354dcdbf7394e70d0f8130e9e43ee5c0fb312cf4b55dd6504f3d4f69'
 
 def logical_snapshot(snapshot):
@@ -64,7 +64,7 @@ def env_map(config):
         out[k]=v
     return out
 
-def verify_api_configuration(before, after, old_image, new_image):
+def verify_image_configuration(old_image, new_image):
     old, new = old_image['Config'],new_image['Config']
     a,b = env_map(old),env_map(new)
     changes={k for k in a.keys() | b.keys() if a.get(k)!=b.get(k)}
@@ -74,6 +74,21 @@ def verify_api_configuration(before, after, old_image, new_image):
     allowed={'org.firecrawl.patch.base','org.firecrawl.patch.base-image-id'}
     if {k for k in al.keys() | bl.keys() if al.get(k)!=bl.get(k)}!=allowed or any(k in bl for k in allowed):
         raise p.Stop('unreviewed image label difference')
+    return a,b,al,bl,allowed
+
+def verify_current_image_configuration(before, old_image):
+    expected=env_map(old_image['Config'])
+    actual=env_map(before['Config'])
+    if actual.get('FIRECRAWL_BUILD_SHA')!=expected.get('FIRECRAWL_BUILD_SHA'):
+        raise p.Stop('current container build SHA differs from image')
+    labels=old_image['Config'].get('Labels') or {}
+    for key in ('org.firecrawl.patch.base','org.firecrawl.patch.base-image-id'):
+        if (before['Config'].get('Labels') or {}).get(key)!=labels.get(key):
+            raise p.Stop('current container image label differs from image')
+
+def verify_api_configuration(before, after, old_image, new_image):
+    a,b,al,bl,allowed=verify_image_configuration(old_image,new_image)
+    verify_current_image_configuration(before,old_image)
     left,right=p.api_configuration(before),p.api_configuration(after)
     ae,be=env_map(left['config']),env_map(right['config'])
     if ae.get('FIRECRAWL_BUILD_SHA')!=a['FIRECRAWL_BUILD_SHA'] or be.get('FIRECRAWL_BUILD_SHA')!=b['FIRECRAWL_BUILD_SHA']:
@@ -96,6 +111,8 @@ def preflight(backup, max_age):
     if browser.get('envfile') and Path(browser['envfile']) != ENV: raise p.Stop('unexpected browser env owner')
     current=browser['services']['api']; core_api=core['services']['api']
     verify_lineage(current['Image'],core_api['Image'],lambda ref:p.inspect('image',ref))
+    old_image=p.inspect('image',CURRENT_IMAGE);new_image=p.inspect('image',EXPECTED)
+    verify_image_configuration(old_image,new_image);verify_current_image_configuration(current,old_image)
     raw=ENV.read_bytes(); updated=proposed_env(raw)
     return {'status':'prepared-not-admitted','backup':backup_evidence,'candidate':EXPECTED,
             'base':BASE_IMAGE,'build':BUILD,'current':logical_snapshot(browser),
@@ -181,6 +198,28 @@ def wait_ready():
         time.sleep(2)
     raise p.Stop('browser readiness timeout')
 
+def stop_failed_candidate():
+    """Stop only the exact browser API candidate; ambiguous state stays gated."""
+    name='firecrawl-browser-api-1'
+    ids=p.run(['docker','ps','-aq','--no-trunc','--filter','name=^/'+name+'$'],timeout=15).split()
+    if not ids:return 'not-present'
+    if len(ids)!=1:raise p.Stop('ambiguous browser API container')
+    row=p.inspect('container',ids[0]);labels=row.get('Config',{}).get('Labels') or {}
+    if (row.get('Name')!='/'+name or row.get('Id')!=ids[0] or row.get('Image')!=EXPECTED or
+        labels.get('com.docker.compose.project')!='firecrawl-browser' or
+        labels.get('com.docker.compose.service')!='api'):
+        raise p.Stop('candidate identity cannot be verified; gate retained')
+    if row['State']['Running']:
+        p.run(['docker','stop','--time','60',row['Id']],timeout=90)
+        if p.inspect('container',row['Id'])['State']['Running']:
+            raise p.Stop('candidate API did not stop; gate retained')
+        return 'stopped'
+    return 'already-stopped'
+
+def require_no_browser_connections():
+    if p.run(['ss','-H','-tn','state','established','( sport = :3007 )'],timeout=10):
+        raise p.Stop('browser has active connections')
+
 def upgrade(backup,max_age,manifest,manifest_sha,guard,guard_sha):
     os.umask(0o077)
     with p.locks():
@@ -193,6 +232,8 @@ def upgrade(backup,max_age,manifest,manifest_sha,guard,guard_sha):
         if not db['State']['Running']: raise p.Stop('browser database is not running')
         if snapshot.get('envfile') and Path(snapshot['envfile'])!=ENV: raise p.Stop('unexpected browser environment owner')
         verify_lineage(current['Image'],core['services']['api']['Image'],lambda ref:p.inspect('image',ref))
+        old_image=p.inspect('image',CURRENT_IMAGE);new_image=p.inspect('image',EXPECTED)
+        verify_image_configuration(old_image,new_image);verify_current_image_configuration(current,old_image)
         source_digest=checked_manifest(manifest,manifest_sha)
         raw=ENV.read_bytes(); st=ENV.stat(); updated=proposed_env(raw)
         if hasattr(os,'listxattr') and os.listxattr(ENV): raise p.Stop('unsupported runtime.env attributes')
@@ -224,19 +265,22 @@ def upgrade(backup,max_age,manifest,manifest_sha,guard,guard_sha):
         def save():p.atomic_write(receipt_dir/'receipt.json',json.dumps(record,indent=2).encode())
         save();gate=p.BROWSER/'admission-paused'; frozen=False; paused=False; success=False; watchdog=None
         try:
-            if not idle(db['Id']) or p.run(['ss','-H','-tn','state','established','( sport = :3007 )'],timeout=10):
-                raise p.Stop('browser is busy')
+            if not idle(db['Id']):raise p.Stop('browser is busy')
+            require_no_browser_connections()
             pid=p.manager_pid()
             with gate.open('x') as f:f.write(receipt_dir.name)
             paused=True;record['status']='admission-paused';save()
             if p.manager_pid()!=pid:raise p.Stop('manager identity changed')
             watchdog=p.start_thaw_watchdog(pid);frozen=True;p.freeze(pid)
             if not idle(db['Id']) or p.manager_pid()!=pid:raise p.Stop('browser became busy')
+            require_no_browser_connections()
             if logical_snapshot(p.project_snapshot('firecrawl-browser'))!=before or ENV.read_bytes()!=raw:
                 raise p.Stop('browser changed during preflight')
             if any(hashlib.sha256(Path(k).read_bytes()).hexdigest()!=v for k,v in unit_hashes.items()):raise p.Stop('browser unit changed')
             if any(hashlib.sha256(Path(k).read_bytes()).hexdigest()!=v for k,v in files.items()):raise p.Stop('compose source changed')
             if checked_manifest(manifest,manifest_sha)!=source_digest:raise p.Stop('source binding changed')
+            verify_image_configuration(p.inspect('image',CURRENT_IMAGE),p.inspect('image',EXPECTED))
+            verify_current_image_configuration(current,p.inspect('image',CURRENT_IMAGE))
             record['status']='stopping-api';save();p.run(['docker','stop','--time','60',current['Id']],timeout=90)
             if p.inspect('container',current['Id'])['State']['Running'] or not idle(db['Id']):
                 p.run(['docker','start',current['Id']],timeout=90);wait_ready();raise p.Stop('busy after stop; original API restarted')
@@ -264,15 +308,32 @@ def upgrade(backup,max_age,manifest,manifest_sha,guard,guard_sha):
             record['status']='ready-admission-paused';record['after']=logical_snapshot(after);save();success=True
         except Exception as exc:
             record['failure_stage']=record['status'];record['status']='failed-manual-intervention'
-            record['failure']=str(exc) if isinstance(exc,p.Stop) else type(exc).__name__;save();raise
+            record['failure']=str(exc) if isinstance(exc,p.Stop) else type(exc).__name__
+            if record['failure_stage'] in ('recreating-api','ready-admission-paused'):
+                try:record['candidate_stop']=stop_failed_candidate()
+                except Exception as stop_error:
+                    record['candidate_stop']='failed'
+                    record['candidate_stop_error']=str(stop_error) if isinstance(stop_error,p.Stop) else type(stop_error).__name__
+            save();raise
         finally:
-            if frozen:
-                try:os.kill(pid,signal.SIGCONT)
-                except ProcessLookupError:raise p.Stop('manager disappeared; gate retained')
-            if watchdog:watchdog.stdin.close();watchdog.wait(timeout=5)
-            if success and paused:
-                if gate.read_text()!=receipt_dir.name:raise p.Stop('admission gate owner changed')
-                gate.unlink()
+            try:
+                if frozen:
+                    try:os.kill(pid,signal.SIGCONT)
+                    except ProcessLookupError:raise p.Stop('manager disappeared; gate retained')
+                if watchdog:watchdog.stdin.close();watchdog.wait(timeout=5)
+                if success and paused:
+                    if gate.read_text()!=receipt_dir.name:raise p.Stop('admission gate owner changed')
+                    gate.unlink()
+            except Exception as final_error:
+                if success:
+                    record['failure_stage']='finalizing';record['status']='failed-manual-intervention'
+                    record['failure']=str(final_error) if isinstance(final_error,p.Stop) else type(final_error).__name__
+                    try:record['candidate_stop']=stop_failed_candidate()
+                    except Exception as stop_error:
+                        record['candidate_stop']='failed'
+                        record['candidate_stop_error']=str(stop_error) if isinstance(stop_error,p.Stop) else type(stop_error).__name__
+                    save()
+                raise
         record['status']='complete';save();return receipt_dir/'receipt.json'
 
 if __name__ == '__main__':

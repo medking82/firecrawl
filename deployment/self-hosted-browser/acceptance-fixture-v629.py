@@ -14,7 +14,8 @@ images = {'db':'sha256:1b3f0c48add7f26ed3a9df806d324c8048226ee75a486f451b08b527d
           'browser':'sha256:aa50d6e5cfc9cc649a1344433e1c31817b7d6638605bf64505b7c03265700f54',
           'api':cfg.get('api_image','sha256:1786bac1ee0ffd0623b1609e6d8e73dc4956cc1cd5223698b6b274bb5d46a764')}
 if images['api'] not in ('sha256:1786bac1ee0ffd0623b1609e6d8e73dc4956cc1cd5223698b6b274bb5d46a764',
-                         'sha256:dafa957ae517bb089e6892dd323cd12e9afc471da3ecdae193bed6c6ec21cb7f'):
+                         'sha256:dafa957ae517bb089e6892dd323cd12e9afc471da3ecdae193bed6c6ec21cb7f',
+                         'sha256:e97dde38a74efbbbcc487a4d99e90a12bab8f8000c4c7759d6cbeabc1e9a409d'):
     raise ValueError('unreviewed fixture API image')
 root = Path(tempfile.mkdtemp(prefix=prefix+'-', dir='/tmp'))
 os.chmod(root, 0o755)

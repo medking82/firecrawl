@@ -3,6 +3,7 @@ import importlib.util
 import hashlib
 import ast
 import unittest
+import tempfile
 from pathlib import Path
 from unittest import mock
 
@@ -45,20 +46,57 @@ class BrowserUpgradeContracts(unittest.TestCase):
         new={'Config':{'Env':['FIRECRAWL_BUILD_SHA='+u.BUILD,'OTHER=x'],'Labels':{}}}
         before={'Config':copy.deepcopy(old['Config']),'HostConfig':{},'Mounts':[]}
         after={'Config':copy.deepcopy(new['Config']),'HostConfig':{},'Mounts':[]}
+        u.verify_image_configuration(old,new)
+        u.verify_current_image_configuration(before,old)
         u.verify_api_configuration(before,after,old,new)
         after['Config']['Env'].append('UNEXPECTED=x')
         with self.assertRaises(u.p.Stop):u.verify_api_configuration(before,after,old,new)
         after['Config']['Env'].pop();new['Config']['Labels']['unexpected']='x'
         with self.assertRaises(u.p.Stop):u.verify_api_configuration(before,after,old,new)
+        with self.assertRaises(u.p.Stop):u.verify_image_configuration(old,new)
+        new['Config']['Labels'].clear();new['Config']['Env'].append('UNEXPECTED=x')
+        with self.assertRaises(u.p.Stop):u.verify_image_configuration(old,new)
+        before['Config']['Env'][0]='FIRECRAWL_BUILD_SHA=wrong'
+        with self.assertRaises(u.p.Stop):u.verify_current_image_configuration(before,old)
 
     def test_manifest_binds_all_sources_and_compiled_outputs(self):
         path=Path(__file__).with_name('candidate-v629.manifest.json')
         digest=hashlib.sha256(path.read_bytes()).hexdigest()
         import json
         data=json.loads(path.read_text());compiled={**data['compiled'],**data['base_compiled']}
-        with mock.patch.object(u.p,'run',side_effect=lambda args,timeout: compiled[args[-1]]+'  '+args[-1]):
-            self.assertEqual(u.checked_manifest(path,digest),digest)
-            with self.assertRaises(u.p.Stop):u.checked_manifest(path,'0'*64)
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);base=root/'deployment/self-hosted-browser';base.mkdir(parents=True)
+            for name in data['sources']:
+                source=Path(__file__).resolve().parents[2]/name
+                target=root/name;target.parent.mkdir(parents=True,exist_ok=True)
+                target.write_bytes(source.read_bytes().replace(b'\r\n',b'\n'))
+            fixture=base/'candidate-v629.manifest.json';fixture.write_bytes(path.read_bytes())
+            with mock.patch.object(u,'BASE',base), mock.patch.object(u.p,'run',side_effect=lambda args,timeout: compiled[args[-1]]+'  '+args[-1]):
+                self.assertEqual(u.checked_manifest(fixture,digest),digest)
+                with self.assertRaises(u.p.Stop):u.checked_manifest(fixture,'0'*64)
+
+    def test_failed_candidate_stop_checks_name_project_service_and_image(self):
+        row={'Id':'id','Name':'/firecrawl-browser-api-1','Image':u.EXPECTED,'State':{'Running':True},
+             'Config':{'Labels':{'com.docker.compose.project':'firecrawl-browser','com.docker.compose.service':'api'}}}
+        stopped=copy.deepcopy(row);stopped['State']['Running']=False
+        with mock.patch.object(u.p,'run',side_effect=['id','']) as run, mock.patch.object(u.p,'inspect',side_effect=[row,stopped]):
+            self.assertEqual(u.stop_failed_candidate(),'stopped')
+            self.assertEqual(run.call_args_list[1].args[0],['docker','stop','--time','60','id'])
+        for key in ('Name','Image','project','service'):
+            bad=copy.deepcopy(row)
+            if key in ('Name','Image'):bad[key]='wrong'
+            else:bad['Config']['Labels']['com.docker.compose.'+key]='wrong'
+            with self.subTest(key=key),mock.patch.object(u.p,'run',return_value='id') as run, mock.patch.object(u.p,'inspect',return_value=bad):
+                with self.assertRaises(u.p.Stop):u.stop_failed_candidate()
+                self.assertEqual(run.call_count,1)
+        with mock.patch.object(u.p,'run',return_value=''):
+            self.assertEqual(u.stop_failed_candidate(),'not-present')
+
+    def test_live_http_connection_rejects_cutover(self):
+        with mock.patch.object(u.p,'run',return_value='ESTAB fixture'):
+            with self.assertRaises(u.p.Stop):u.require_no_browser_connections()
+        with mock.patch.object(u.p,'run',return_value=''):
+            u.require_no_browser_connections()
 
     def test_canonical_updater_and_guard_pins_and_audit_extraction(self):
         updater=Path(__file__).resolve().parents[1]/'firecrawl-updater/deployment/firecrawl_update.sh'

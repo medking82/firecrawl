@@ -64,6 +64,21 @@ class ForkSyncTest(unittest.TestCase):
         evidence=next(self.state.glob('fork-sync.*/snapshots'))
         self.assertTrue((evidence.parent/'worktree').exists())
         self.assertNotIn('status=complete',evidence.read_text())
+        again=self.invoke(); self.assertNotEqual(again.returncode,0)
+        self.assertIn('prior fork sync requires inspection',again.stdout)
+        self.assertEqual(len(list(self.state.glob('fork-sync.*'))),1)
+        self.assertEqual(self.ref(self.origin),fork)
+
+    def test_upstream_trailing_whitespace_does_not_block_sync(self):
+        self.write('upstream.txt','upstream content  \n'); self.commit('upstream whitespace')
+        self.git('push','upstream','main'); wanted=self.ref(self.upstream)
+        result=self.invoke(); self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(self.ref(self.origin),wanted)
+
+    def test_incomplete_worktree_without_snapshots_blocks_new_worktree(self):
+        previous=self.state/'fork-sync.previous'; (previous/'worktree').mkdir(parents=True)
+        result=self.invoke(); self.assertNotEqual(result.returncode,0)
+        self.assertEqual(list(self.state.glob('fork-sync.*')),[previous])
 
     def test_fast_forward_and_already_current(self):
         self.write('upstream.txt','new\n');self.commit('upstream');self.git('push','upstream','main')
