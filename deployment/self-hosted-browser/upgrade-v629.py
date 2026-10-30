@@ -43,9 +43,10 @@ def logical_snapshot(snapshot):
                                          for m in row.get('Mounts',[])], key=lambda m:m['Destination'])}
     return result
 
-def require_healthy(snapshot):
+def require_healthy(snapshot, *, completed=()):
     for name,row in logical_snapshot(snapshot).items():
-        if (row['running'] is not True or row['restarting'] or row['oom_killed'] or row['exit_code'] not in (0,None)
+        finished_ok=name in completed and row['running'] is False and row['exit_code']==0
+        if ((row['running'] is not True and not finished_ok) or row['restarting'] or row['oom_killed'] or row['exit_code'] not in (0,None)
             or row['health'] not in (None,'healthy') or row['health_failing_streak'] not in (None,0)):
             raise p.Stop('container is not healthy: '+name)
 
@@ -250,7 +251,8 @@ def upgrade(backup,max_age,manifest,manifest_sha,guard,guard_sha):
         snapshot=p.project_snapshot('firecrawl-browser'); core=p.project_snapshot('firecrawl')
         others={name:p.project_snapshot(name) for name in ('firecrawl','firecrawl-monitor')}
         require_healthy(snapshot)
-        for item in others.values():require_healthy(item)
+        for name,item in others.items():
+            require_healthy(item,completed=('foundationdb-init',) if name=='firecrawl' else ())
         current=snapshot['services']['api']; db=snapshot['services']['app-db']
         if not db['State']['Running']: raise p.Stop('browser database is not running')
         if snapshot.get('envfile') and Path(snapshot['envfile'])!=ENV: raise p.Stop('unexpected browser environment owner')

@@ -28,6 +28,15 @@ class BrowserUpgradeContracts(unittest.TestCase):
         with self.assertRaises(u.p.Stop):u.require_healthy(changed)
         u.require_healthy(snap)
 
+    def test_only_explicit_successful_init_may_be_stopped(self):
+        state={'Running':False,'ExitCode':0,'Restarting':False,'OOMKilled':False}
+        snap={'services':{'foundationdb-init':{'Id':'i','Image':'img','State':state,'Mounts':[]}}}
+        with self.assertRaises(u.p.Stop):u.require_healthy(snap)
+        u.require_healthy(snap,completed=('foundationdb-init',))
+        for key,value in [('ExitCode',1),('Restarting',True),('OOMKilled',True)]:
+            changed=copy.deepcopy(snap);changed['services']['foundationdb-init']['State'][key]=value
+            with self.subTest(key=key),self.assertRaises(u.p.Stop):u.require_healthy(changed,completed=('foundationdb-init',))
+
     def test_lineage_and_env_require_exact_images(self):
         imgs={u.BASE_IMAGE:{'Id':u.BASE_IMAGE,'RootFS':{'Layers':['a','b']}},u.EXPECTED:{'Id':u.EXPECTED,'RootFS':{'Layers':['a','b','c']}}}
         u.verify_lineage(u.CURRENT_IMAGE,u.CURRENT_CORE,imgs.__getitem__)
