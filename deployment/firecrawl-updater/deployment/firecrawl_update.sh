@@ -565,6 +565,9 @@ for identity in ids:
     service, image = data.get("service"), data.get("image")
     if not isinstance(service, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", service) or not isinstance(image, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", image):
         raise SystemExit("invalid Compose image snapshot")
+    if subprocess.run(["docker", "image", "inspect", image], stdout=subprocess.DEVNULL,
+                      stderr=subprocess.DEVNULL, timeout=10).returncode:
+        raise SystemExit("exact Compose recovery image unavailable; refusing cutover")
     if service in services and services[service]["image"] != image:
         raise SystemExit("ambiguous Compose image snapshot")
     files, project = data.get("compose_files"), data.get("project")

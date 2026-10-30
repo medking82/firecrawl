@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -18,6 +19,29 @@ SOURCE = Path(__file__).with_name('firecrawl_update.sh')
 
 @unittest.skipUnless(os.name == 'posix' and shutil.which('bash'), 'GA401 Bash owner required')
 class ResearchUpdaterTests(unittest.TestCase):
+    def test_snapshot_refuses_missing_recovery_image_before_writing_manifest(self):
+        body = SOURCE.read_text().split("<<'PYSNAPSHOT'\n", 1)[1].split('\nPYSNAPSHOT', 1)[0]
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / 'container-ids').write_text('a' * 64)
+            for name in ('docker-compose.yaml', 'docker-compose.override.yaml'):
+                (root / name).touch()
+            data = {'service': 'api', 'image': 'sha256:' + 'b' * 64,
+                    'compose_files': ','.join(str(root / name) for name in
+                                              ('docker-compose.yaml', 'docker-compose.override.yaml')),
+                    'project': 'firecrawl'}
+            def fake_run(args, **kwargs):
+                if args[:2] == ['docker', 'inspect']:
+                    return SimpleNamespace(stdout=json.dumps(data), returncode=0)
+                if args[:3] == ['docker', 'image', 'inspect']:
+                    return SimpleNamespace(returncode=1)
+                raise AssertionError(args)
+            with patch.object(sys, 'argv', ['snapshot', str(root)]), patch.object(Path, 'cwd', return_value=root), \
+                    patch.object(subprocess, 'run', side_effect=fake_run):
+                with self.assertRaisesRegex(SystemExit, 'recovery image unavailable'):
+                    exec(compile(body, 'snapshot', 'exec'), {})
+            self.assertFalse((root / 'compose-images.json').exists())
+
     def test_prior_image_only_overlays_can_differ_between_one_shot_and_live_services(self):
         body = SOURCE.read_text().split("<<'PYSNAPSHOT'\n",1)[1].split('\nPYSNAPSHOT',1)[0]
         tree = ast.parse(body)
@@ -128,7 +152,6 @@ main
     def test_preparation_allows_readers_serializes_runs_and_defers_busy_cutover(self):
         import fcntl
         import time
-        from gateway import public_web as web
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp); child=self.run_owner(root,'prepare-pause',background=True)
             try:
@@ -137,7 +160,8 @@ main
                     self.assertIsNone(child.poll())
                     self.assertLess(time.monotonic(),deadline)
                     time.sleep(.02)
-                with patch.object(web,'_UPDATE_LOCK_PATH',root/'state/update.lock'), web.public_fetch_lease():
+                with (root/'state/update.lock').open('rb') as reader:
+                    fcntl.flock(reader, fcntl.LOCK_SH)
                     with (root/'state/update.lock').open('rb') as installer:
                         with self.assertRaises(BlockingIOError):
                             fcntl.flock(installer,fcntl.LOCK_EX|fcntl.LOCK_NB)
