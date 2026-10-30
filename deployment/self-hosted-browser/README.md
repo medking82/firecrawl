@@ -56,6 +56,11 @@ are `streamWebView: false` and `blockAds: false`; explicitly set `blockAds: fals
 on the original scrape when planning to interact with it. Use the native HTTP
 API if an installed CLI assumes hosted-only defaults.
 
+For v2.11.626, the browser overlay forwards upstream's zero-data-retention
+flag to Hangar. The local manager cannot supply ZDR-only proxy exits, so local
+ZDR session creation fails closed. This compatibility change has not itself
+established acceptance against a v2.11.626 runtime image.
+
 ## Isolation And Cleanup
 
 `firecrawl-browser-manager.service` is the trusted lifecycle supervisor. Its

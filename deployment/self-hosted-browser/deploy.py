@@ -52,6 +52,7 @@ private(HERE/'files.json',json.dumps(FILES))
 dockerfile=['ARG BASE_API','FROM ${BASE_API}','USER root']
 dockerfile += [f'COPY apps/api/src/{p}.ts /tmp/browser-src/{p}.ts' for p in FILES]
 dockerfile += ['COPY deployment/self-hosted-browser/files.json /tmp/browser-files.json',
+              'COPY deployment/self-hosted-browser/hangar-compat.cjs /tmp/hangar-compat.cjs',
               'COPY deployment/self-hosted-browser/compile.cjs /tmp/compile-browser.cjs','RUN node /tmp/compile-browser.cjs']
 private(HERE/'Dockerfile.generated','\n'.join(dockerfile)+'\n')
 run(['docker','build','--network=none','--pull=false','--build-arg','BASE_API='+tag,'-t',config['BROWSER_API_IMAGE'],'-f',str(HERE/'Dockerfile.generated'),str(SOURCE)])

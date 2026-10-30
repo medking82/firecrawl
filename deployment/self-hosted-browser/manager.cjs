@@ -8,6 +8,25 @@ const crypto = require('node:crypto');
 const { spawn, execFileSync } = require('node:child_process');
 const ROOT = process.env.BROWSER_STATE_DIR;
 const RUNTIME = __dirname;
+const fixture = process.env.BROWSER_FIXTURE_ID;
+if (fixture !== undefined && !/^[a-f0-9]{32}$/.test(fixture)) throw new Error('invalid_fixture_id');
+if (fixture) {
+  // Fixture recovery may delete saved session directories. Never allow it to
+  // operate on a production root, an alias, or an unmarked directory.
+  const expected = `/tmp/firecrawl-browser-fixture-${fixture}`;
+  if (ROOT !== expected || fs.realpathSync(ROOT) !== expected || fs.realpathSync('/tmp') !== '/tmp') throw new Error('invalid_fixture_root');
+  const rootStat = fs.lstatSync(ROOT);
+  const marker = path.join(ROOT, '.fixture-id');
+  const markerStat = fs.lstatSync(marker);
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink() || rootStat.uid !== process.getuid() || (rootStat.mode & 0o777) !== 0o700 ||
+      !markerStat.isFile() || markerStat.isSymbolicLink() || markerStat.uid !== process.getuid() ||
+      (markerStat.mode & 0o777) !== 0o600 || markerStat.nlink !== 1 || fs.readFileSync(marker, 'utf8') !== fixture)
+    throw new Error('invalid_fixture_marker');
+}
+const sessionLabel = fixture ? `firecrawl.browser-fixture=${fixture}` : 'firecrawl.self-hosted-browser=session';
+const sessionPrefix = fixture ? `firecrawl-fixture-${fixture}-session-` : 'firecrawl-browser-session-';
+const cdpPort = fixture ? Number(process.env.BROWSER_FIXTURE_CDP_PORT) : 3008;
+if (fixture && (!Number.isInteger(cdpPort) || cdpPort < 1024 || cdpPort > 65535 || cdpPort === 3008)) throw new Error('invalid_fixture_cdp_port');
 const sessions = new Map();
 const keys = new Map();
 const LIMIT = 2;
@@ -74,12 +93,12 @@ async function create(body,key) {
     throw Object.assign(new Error('invalid_ttl'),{status:400});
   const id='br_'+crypto.randomUUID().replaceAll('-','');
   const now=Date.now()/1000;
-  const s={id,name:'firecrawl-browser-session-'+id,dir:path.join(ROOT,'sessions',id),status:'starting',created:now,expires:now+ttl,last:now,idle,token:crypto.randomBytes(32).toString('hex')};
+  const s={id,name:sessionPrefix+id,dir:path.join(ROOT,'sessions',id),status:'starting',created:now,expires:now+ttl,last:now,idle,token:crypto.randomBytes(32).toString('hex')};
   sessions.set(id,s); keys.set(body.owner+':'+key,id);
   fs.mkdirSync(s.dir,{mode:0o700});
   persist();
   try {
-    docker(['run','-d','--name',s.name,'--label','firecrawl.self-hosted-browser=session','--pull=never',
+    docker(['run','-d','--name',s.name,'--label',sessionLabel,'--pull=never',
       '--network=none','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges',
       '--pids-limit=256','--memory=1g','--cpus=1','--shm-size=256m',
       '--tmpfs','/tmp:rw,nosuid,nodev,size=384m,uid=1000,gid=1000','--user','1000:1000',
@@ -160,7 +179,7 @@ async function main() {
     const saved=JSON.parse(fs.readFileSync(path.join(ROOT,'sessions.json'),'utf8'));
     for(const s of saved.sessions){
       if(!/^br_[a-f0-9]{32}$/.test(s.id))throw new Error('invalid_saved_session');
-      s.dir=path.join(ROOT,'sessions',s.id);s.name='firecrawl-browser-session-'+s.id;
+      s.dir=path.join(ROOT,'sessions',s.id);s.name=sessionPrefix+s.id;
       sessions.set(s.id,s);
     }
     for(const [k,v]of saved.keys)if(sessions.has(v))keys.set(k,v);
@@ -168,7 +187,7 @@ async function main() {
     for(const s of sessions.values())if(s.status!=='stopped')stop(s);
   }
   // Recover only our labelled disposable containers after an unclean supervisor exit.
-  const orphans=docker(['ps','-aq','--filter','label=firecrawl.self-hosted-browser=session']).split(/\s+/).filter(Boolean);
+  const orphans=docker(['ps','-aq','--filter','label='+sessionLabel]).split(/\s+/).filter(Boolean);
   if(orphans.length)docker(['rm','-f',...orphans]);
   for(const name of fs.readdirSync(path.join(ROOT,'sessions'))) {
     if(!/^br_[a-f0-9]{32}$/.test(name))throw new Error('unexpected_session_directory');
@@ -215,7 +234,7 @@ async function main() {
   const sock=path.join(ROOT,'manager.sock');if(fs.existsSync(sock))fs.unlinkSync(sock);
   server.listen(sock,()=>fs.chmodSync(sock,0o600));
   const cdp=createCdpServer();
-  cdp.listen(3008,'127.0.0.1');
+  cdp.listen(cdpPort,'127.0.0.1');
   setInterval(()=>{
     const now=Date.now()/1000;
     for(const s of sessions.values()) {

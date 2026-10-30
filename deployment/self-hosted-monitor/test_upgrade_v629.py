@@ -1,0 +1,80 @@
+import importlib.util
+import sys
+import unittest
+from pathlib import Path
+from unittest import mock
+
+base = Path(__file__).resolve().parent
+spec = importlib.util.spec_from_file_location('upgrade_v629', base / 'upgrade-v629.py')
+u = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(u)
+
+
+class UpgradePreflightTests(unittest.TestCase):
+    def test_exact_current_and_base_layers_required(self):
+        old = {'Image': u.CURRENT_IMAGE}; core = {'Image': u.ACTUAL_CORE}
+        build='FIRECRAWL_BUILD_SHA=74f81da6935bcbf581480a888c2ed3fd81fc2d85'
+        images = {u.BASE_IMAGE: {'Id': u.BASE_IMAGE, 'Config': {'Env':[build]}, 'RootFS': {'Layers': ['a', 'b']}},
+                  u.EXPECTED: {'RootFS': {'Layers': ['a', 'b', 'c']}}}
+        actual=u.ACTUAL_CORE
+        images[actual]={'Id':actual,'Config':{'Env':[build]},'RootFS':{'Layers':['a','b']}}
+        with mock.patch.object(u.p, 'inspect', side_effect=lambda kind, ref: images[ref]), \
+             mock.patch.object(u.p, 'run', return_value=build.split('=',1)[1]):
+            self.assertEqual(u.verify_image_binding(old, core, u.EXPECTED)['actual_core'],actual)
+            for bad_old, bad_base in [({'Image': 'wrong'}, core), (old, {'Image': 'wrong'})]:
+                with self.assertRaises(u.p.Stop): u.verify_image_binding(bad_old, bad_base, u.EXPECTED)
+            images[actual]['RootFS']['Layers']=['a','different']
+            with self.assertRaises(u.p.Stop): u.verify_image_binding(old, {'Image':actual}, u.EXPECTED)
+            images[actual]['RootFS']['Layers']=['a','b']
+            images[actual]['Config']['Env'].append('EXTRA=changed')
+            with self.assertRaises(u.p.Stop): u.verify_image_binding(old, core, u.EXPECTED)
+            images[actual]['Config']['Env'].pop()
+            images[u.EXPECTED]['RootFS']['Layers'] = ['a', 'different', 'c']
+            with self.assertRaises(u.p.Stop): u.verify_image_binding(old, core, u.EXPECTED)
+
+    def test_idle_rejects_busy_queues_checks_or_database(self):
+        for values in (['1'], ['0', '1'], ['0', '0', '1']):
+            with self.subTest(values=values), mock.patch.object(u, 'sql', side_effect=values):
+                self.assertFalse(u.idle('db'))
+        with mock.patch.object(u, 'sql', side_effect=['0', '0', '0']):
+            self.assertTrue(u.idle('db'))
+
+    def test_http_connections_are_not_treated_as_drained(self):
+        with mock.patch.object(u.p, 'run', return_value='ESTAB 0 0'):
+            self.assertFalse(u.http_idle())
+        with mock.patch.object(u.p, 'run', return_value=''):
+            self.assertTrue(u.http_idle())
+
+    def test_629_schema_check_is_read_only(self):
+        with mock.patch.object(u, 'sql') as sql:
+            u.check_schema('fixture-db')
+            self.assertEqual(sql.call_count, 1)
+            self.assertTrue(sql.call_args.args[2].startswith('SELECT '))
+
+    def test_image_only_env_update_preserves_secret_bytes(self):
+        old = b'SECRET=unchanged=a\r\nMONITOR_IMAGE=old\nBASE_API=base\nOTHER=unchanged\n'
+        new = u.p.replace_env(old, {'MONITOR_IMAGE': u.EXPECTED, 'BASE_API': u.BASE_IMAGE})
+        self.assertEqual(new.replace(u.EXPECTED.encode(), b'old').replace(u.BASE_IMAGE.encode(), b'base'), old)
+
+    def test_reviewed_build_env_and_patch_labels_only(self):
+        old_labels = {}
+        old_image = {'Config': {'Env': ['FIRECRAWL_BUILD_SHA=cccc2a6e554be566e1a504def286fca281b69024', 'OTHER=x'], 'Labels': old_labels}}
+        new_image = {'Config': {'Env': ['FIRECRAWL_BUILD_SHA=74f81da6935bcbf581480a888c2ed3fd81fc2d85', 'OTHER=x'], 'Labels': {}}}
+        before = {'Config': {'Env': old_image['Config']['Env'][:], 'Labels': dict(old_labels)}, 'HostConfig': {}, 'Mounts': []}
+        after = {'Config': {'Env': new_image['Config']['Env'][:], 'Labels': {}}, 'HostConfig': {}, 'Mounts': []}
+        with mock.patch.object(u.p, 'inspect', side_effect=lambda kind, ref: old_image if ref == u.CURRENT_IMAGE else new_image):
+            u.verify_image_configuration()
+            u.verify_current_image_configuration(before, old_image['Config'])
+            u.verify_api_configuration(before, after)
+            after['Config']['Env'].append('UNEXPECTED=x')
+            with self.assertRaises(u.p.Stop): u.verify_api_configuration(before, after)
+            after['Config']['Env'].pop()
+            new_image['Config']['Env'].append('OTHER_NEW=x')
+            with self.assertRaises(u.p.Stop): u.verify_api_configuration(before, after)
+            with self.assertRaises(u.p.Stop): u.verify_image_configuration()
+            before['Config']['Env'][0] = 'FIRECRAWL_BUILD_SHA=wrong'
+            with self.assertRaises(u.p.Stop): u.verify_current_image_configuration(before, old_image['Config'])
+
+
+if __name__ == '__main__':
+    unittest.main()

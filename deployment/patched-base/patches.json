@@ -1,0 +1,4 @@
+[
+  {"name": "decode-uri-component", "affected": ">=0.0.0 <0.5.1", "target": "0.5.1"},
+  {"name": "systeminformation", "affected": ">=0.0.0 <5.33.16", "target": "5.33.18"}
+]

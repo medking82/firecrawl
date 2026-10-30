@@ -1,0 +1,6 @@
+ARG BASE
+FROM ${BASE}
+USER root
+RUN mkdir -p /usr/local/share/corepack && cp -a /root/.cache/node/corepack/. /usr/local/share/corepack/ && chmod -R a+rX /usr/local/share/corepack
+ENV COREPACK_HOME=/usr/local/share/corepack
+USER node
