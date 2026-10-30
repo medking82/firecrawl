@@ -22,6 +22,7 @@ from upgrade_stop_candidate import stop_candidate
 PROJECT = 'firecrawl-monitor'
 EXPECTED = 'sha256:89b2bacf0c5f6d9a183d8f9f5ff9ff5ae64a1757b61fd5509990aa2f804398f4'
 BASE_IMAGE = 'sha256:b967b93629d2a1c2a46ab160058f29f5d23ae67e6e8b3880656ec4d0f8d78cfd'
+ACTUAL_CORE = 'sha256:ea19422d7a62e0a7421f56e52878aaa023c8c829f0470bfdc85acf15865988b6'
 CURRENT_IMAGE = 'sha256:079ea46137172ec51f50d882beef02b0a7cd55408c9d87624f94f3c730ae94c3'
 CURRENT_BASE_REF = 'sha256:f4495407eea50a90846f4571f407253948e9be2eabfcc988f658bca1096417ff'
 GUARD_SHA = '07f73956c9531c483ccd9816af9b3aa06de87424dc0ab33758e9daa2c5e16c3d'
@@ -53,12 +54,29 @@ def config_hash(config):
 
 
 def verify_image_binding(current, base, candidate):
-    if current['Image'] != CURRENT_IMAGE or base['Image'] != BASE_IMAGE:
-        raise p.Stop('current monitor or base image changed')
-    parent = p.inspect('image', BASE_IMAGE).get('RootFS', {}).get('Layers')
+    if current['Image'] != CURRENT_IMAGE:
+        raise p.Stop('current monitor image changed')
+    actual_id = p.require_id(base['Image'])
+    if actual_id != ACTUAL_CORE:
+        raise p.Stop('running core is not the recorded equivalent image')
+    reviewed = p.inspect('image', BASE_IMAGE)
+    actual = p.inspect('image', actual_id)
+    if reviewed.get('Id') != BASE_IMAGE or actual.get('Id') != actual_id:
+        raise p.Stop('core image identity changed')
+    parent = reviewed.get('RootFS', {}).get('Layers')
+    actual_layers = actual.get('RootFS', {}).get('Layers')
+    source = '74f81da6935bcbf581480a888c2ed3fd81fc2d85'
+    if (not isinstance(parent, list) or not parent or actual_layers != parent
+            or actual.get('Config') != reviewed.get('Config')
+            or env_map(reviewed.get('Config', {})).get('FIRECRAWL_BUILD_SHA') != source
+            or env_map(actual.get('Config', {})).get('FIRECRAWL_BUILD_SHA') != source
+            or p.run(['git', '-C', '/home/marck/github/firecrawl', 'rev-parse', 'HEAD']) != source):
+        raise p.Stop('core artifact layers or build source differ')
     layers = p.inspect('image', candidate).get('RootFS', {}).get('Layers')
     if not isinstance(parent, list) or not parent or not isinstance(layers, list) or len(layers) <= len(parent) or layers[:len(parent)] != parent:
         raise p.Stop('candidate image does not extend the reviewed base layers')
+    return {'reviewed_base': BASE_IMAGE, 'actual_core': actual_id, 'source_commit': source,
+            'layers_equal': True, 'config_equal': True}
 
 
 def env_map(config):
@@ -164,7 +182,7 @@ def upgrade(backup, max_age, guard, guard_sha):
         before_others = {name: p.summary(other_snapshots[name]) for name in other_snapshots}
         stable_summary(p.summary(snapshot))
         for summary in before_others.values(): stable_summary(summary)
-        verify_image_binding(current, other_snapshots['firecrawl']['services']['api'], EXPECTED)
+        core_binding = verify_image_binding(current, other_snapshots['firecrawl']['services']['api'], EXPECTED)
         old_image, _ = verify_image_configuration()
         verify_current_image_configuration(current, old_image)
         env_bytes = ENV.read_bytes(); env_stat = ENV.stat()
@@ -206,7 +224,7 @@ def upgrade(backup, max_age, guard, guard_sha):
                   'candidate': EXPECTED, 'api_before': current['Id'], 'db_id': database['Id'],
                   'compose_sha256': files, 'config_sha256': expected_config,
                   'env_sha256': hashlib.sha256(env_bytes).hexdigest(), 'migration_sha256': migration_sha,
-                  'transport_guard_sha256': guard_sha, 'before': p.summary(snapshot)}
+                  'transport_guard_sha256': guard_sha, 'core_binding': core_binding, 'before': p.summary(snapshot)}
         record['package_check'] = packages
         def save(): p.atomic_write(receipt_dir / 'receipt.json', json.dumps(record, indent=2).encode())
         save()

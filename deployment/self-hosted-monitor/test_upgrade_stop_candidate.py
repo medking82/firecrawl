@@ -85,7 +85,7 @@ class CandidateStopTests(unittest.TestCase):
                 mock.patch.object(u.p,'locks',lambda:contextlib.nullcontext()),mock.patch.object(u,'verify_backup',return_value={}),
                 mock.patch.object(u.p,'project_snapshot',side_effect=snapshots),mock.patch.object(u.p,'inspect',side_effect=inspect),
                 mock.patch.object(u.p,'render',side_effect=render),mock.patch.object(u.p,'run',side_effect=run),
-                mock.patch.object(u.p,'compose',side_effect=compose),mock.patch.object(u,'verify_image_binding'),
+                mock.patch.object(u.p,'compose',side_effect=compose),mock.patch.object(u,'verify_image_binding',return_value={'layers_equal':True,'config_equal':True}),
                 mock.patch.object(u,'verify_image_configuration',return_value=({},{})),mock.patch.object(u,'verify_current_image_configuration'),
                 mock.patch.object(u,'stable_summary',side_effect=lambda x:x),mock.patch.object(u,'installed_package_audit',return_value={}),
                 mock.patch.object(u,'idle',return_value=True),mock.patch.object(u,'http_idle',return_value=True),

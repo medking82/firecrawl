@@ -12,13 +12,23 @@ spec.loader.exec_module(u)
 
 class UpgradePreflightTests(unittest.TestCase):
     def test_exact_current_and_base_layers_required(self):
-        old = {'Image': u.CURRENT_IMAGE}; core = {'Image': u.BASE_IMAGE}
-        images = {u.BASE_IMAGE: {'RootFS': {'Layers': ['a', 'b']}},
+        old = {'Image': u.CURRENT_IMAGE}; core = {'Image': u.ACTUAL_CORE}
+        build='FIRECRAWL_BUILD_SHA=74f81da6935bcbf581480a888c2ed3fd81fc2d85'
+        images = {u.BASE_IMAGE: {'Id': u.BASE_IMAGE, 'Config': {'Env':[build]}, 'RootFS': {'Layers': ['a', 'b']}},
                   u.EXPECTED: {'RootFS': {'Layers': ['a', 'b', 'c']}}}
-        with mock.patch.object(u.p, 'inspect', side_effect=lambda kind, ref: images[ref]):
-            u.verify_image_binding(old, core, u.EXPECTED)
+        actual=u.ACTUAL_CORE
+        images[actual]={'Id':actual,'Config':{'Env':[build]},'RootFS':{'Layers':['a','b']}}
+        with mock.patch.object(u.p, 'inspect', side_effect=lambda kind, ref: images[ref]), \
+             mock.patch.object(u.p, 'run', return_value=build.split('=',1)[1]):
+            self.assertEqual(u.verify_image_binding(old, core, u.EXPECTED)['actual_core'],actual)
             for bad_old, bad_base in [({'Image': 'wrong'}, core), (old, {'Image': 'wrong'})]:
                 with self.assertRaises(u.p.Stop): u.verify_image_binding(bad_old, bad_base, u.EXPECTED)
+            images[actual]['RootFS']['Layers']=['a','different']
+            with self.assertRaises(u.p.Stop): u.verify_image_binding(old, {'Image':actual}, u.EXPECTED)
+            images[actual]['RootFS']['Layers']=['a','b']
+            images[actual]['Config']['Env'].append('EXTRA=changed')
+            with self.assertRaises(u.p.Stop): u.verify_image_binding(old, core, u.EXPECTED)
+            images[actual]['Config']['Env'].pop()
             images[u.EXPECTED]['RootFS']['Layers'] = ['a', 'different', 'c']
             with self.assertRaises(u.p.Stop): u.verify_image_binding(old, core, u.EXPECTED)
 
@@ -53,12 +63,17 @@ class UpgradePreflightTests(unittest.TestCase):
         before = {'Config': {'Env': old_image['Config']['Env'][:], 'Labels': dict(old_labels)}, 'HostConfig': {}, 'Mounts': []}
         after = {'Config': {'Env': new_image['Config']['Env'][:], 'Labels': {}}, 'HostConfig': {}, 'Mounts': []}
         with mock.patch.object(u.p, 'inspect', side_effect=lambda kind, ref: old_image if ref == u.CURRENT_IMAGE else new_image):
+            u.verify_image_configuration()
+            u.verify_current_image_configuration(before, old_image['Config'])
             u.verify_api_configuration(before, after)
             after['Config']['Env'].append('UNEXPECTED=x')
             with self.assertRaises(u.p.Stop): u.verify_api_configuration(before, after)
             after['Config']['Env'].pop()
             new_image['Config']['Env'].append('OTHER_NEW=x')
             with self.assertRaises(u.p.Stop): u.verify_api_configuration(before, after)
+            with self.assertRaises(u.p.Stop): u.verify_image_configuration()
+            before['Config']['Env'][0] = 'FIRECRAWL_BUILD_SHA=wrong'
+            with self.assertRaises(u.p.Stop): u.verify_current_image_configuration(before, old_image['Config'])
 
 
 if __name__ == '__main__':
