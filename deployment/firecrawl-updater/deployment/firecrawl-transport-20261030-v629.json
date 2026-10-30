@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "profile": "v2.11.629",
+  "scope": "Audited public static-fetch transport only; not whole-image safety or deployment approval",
+  "source_commit": "74f81da6935bcbf581480a888c2ed3fd81fc2d85",
+  "baseline_source_commit": "cccc2a6e554be566e1a504def286fca281b69024",
+  "baseline_profile": "v2.11.625",
+  "candidate_api_image": "sha256:b967b93629d2a1c2a46ab160058f29f5d23ae67e6e8b3880656ec4d0f8d78cfd",
+  "candidate_build_sha": "74f81da6935bcbf581480a888c2ed3fd81fc2d85",
+  "prior_guard_sha256": "6fea544ad06987dd7735e8678257c60fb84f49e30bee9981439e8ce18b871889",
+  "dependencies": {"node_major": 22, "undici": "7.30.1", "ipaddr_js": "2.2.0"},
+  "undici_lib_sha256": "213bda9bf7c6860b6714484b606b431c7bdbe4652a20be22e3e20e8b96e1187c",
+  "changed_compiled_hashes": {"/app/dist/src/controllers/v2/types.js": "916db660b9704b4a2b4a54e391f210a3db66f7314d75b01d74be140f8a80b124"},
+  "audit": [
+    "The source commit and candidate BUILD_SHA both identify v2.11.629; the candidate image was provided by the parent build. Source-to-image reproducibility and all upstream code are outside this receipt.",
+    "The exact candidate's isolated fixed-file probe matches the complete v2.11.625 profile except types.js; dependency versions, all predicates, six safeguards and the full 116-file Undici tree match.",
+    "The compiled types delta adds five optional hostedMcp booleans inside existing agent interop blocks. The TypeScript AuthObject change is a comment only. No URL validation or protected scrape/search parameters change.",
+    "In routes/shared.ts hostedMcp is propagated only from successful auth or an interop block whose status is trusted. agent-interop.ts requires a configured nonblank secret and validates all supplied body/header secrets with timing-safe equality; a missing or invalid secret cannot mark an interop block trusted. auth.ts grants hosted MCP identity through verified delegated credentials or the existing proxy-secret check. This review covers the propagation boundary, not all billing or hosted MCP behavior.",
+    "The guard preserves the v2.11.625 profile and rejects unknown mixed bytes. Package admission, Native Review, and live cutover remain separate gates."
+  ],
+  "validation": [
+    "A disposable candidate container used no network, mounts, credentials or service entrypoint; fixed guard probes compared hashes, dependencies, predicates and safeguards with the frozen 625 profile.",
+    "A separate isolated comparison of the candidate and 626 types.js confirmed only five hostedMcp schema additions; source diff and trusted interop/auth logic were inspected."
+  ]
+}

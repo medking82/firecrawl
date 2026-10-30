@@ -114,7 +114,7 @@ repo="$2/repo"; state_dir="$2/state"; scenario="$3"
 record() { printf '%s\n' "$*" >> "$state_dir/calls"; }
 set_restart_policy() { record policy; }
 validate_config() { record config; }
-gh() { record fork-sync; }
+sync_fork_main() { record fork-sync; }
 git() {
   case "$1 $2" in
     'status --porcelain') ;;

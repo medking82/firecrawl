@@ -98,6 +98,16 @@ TRANSPORT_PROFILES["v2.11.625"] = {
     "dependencies": {"node_major": 22, "undici": "7.30.1", "ipaddr_js": "2.2.0"},
     "undici_lib_sha256": "213bda9bf7c6860b6714484b606b431c7bdbe4652a20be22e3e20e8b96e1187c",
 }
+# Frozen 629 public-fetch audit; complete profile only, not release approval.
+TRANSPORT_PROFILES["v2.11.629"] = {
+    "receipt_sha256": "0d37bc069d94b8c6e1e88b62665640720ed3755c6be12e75f9d9a46c3d708be9",
+    "hashes": {
+        **TRANSPORT_PROFILES["v2.11.625"]["hashes"],
+        "/app/dist/src/controllers/v2/types.js": "916db660b9704b4a2b4a54e391f210a3db66f7314d75b01d74be140f8a80b124",
+    },
+    "dependencies": {"node_major": 22, "undici": "7.30.1", "ipaddr_js": "2.2.0"},
+    "undici_lib_sha256": "213bda9bf7c6860b6714484b606b431c7bdbe4652a20be22e3e20e8b96e1187c",
+}
 EXPECTED_PREDICATES = {
     "ALLOW_LOCAL_WEBHOOKS_true": False,
     "PROXY_SERVER_nonempty": False,

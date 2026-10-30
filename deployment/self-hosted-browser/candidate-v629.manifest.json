@@ -1,0 +1,51 @@
+{
+  "candidate": "sha256:dafa957ae517bb089e6892dd323cd12e9afc471da3ecdae193bed6c6ec21cb7f",
+  "base": "sha256:b967b93629d2a1c2a46ab160058f29f5d23ae67e6e8b3880656ec4d0f8d78cfd",
+  "build": "74f81da6935bcbf581480a888c2ed3fd81fc2d85",
+  "sources": {
+    "apps/api/src/lib/local-artifacts.ts": "38a31a34d02a88d4bab0aac9d3fab7f0dc6f136ba9356ee176998534e7de5503",
+    "apps/api/src/lib/gcs-jobs.ts": "1d19e20f384b1e821039cda27c748441c3944dfd195d1cf5b77c16d8a883f66b",
+    "apps/api/src/lib/gcs-monitoring.ts": "25badcf44f974e1763913e3c0867498062d7ab19a5a645d8a916756f142a6e6d",
+    "apps/api/src/lib/local-monitor-judge.ts": "727d65815c8078108235e48389033a4e75257b054de1b73842a27570a72ef0bc",
+    "apps/api/src/services/monitoring/judgeChange.ts": "3e186118d88c8f201406dd58971f782edf2eb50faa2d27499599c5f3862a7cde",
+    "apps/api/src/services/logging/log_job.ts": "d3bac70c2e47bf09772d0048363b1b7420044b9b856369a33fd933c52abbfd64",
+    "apps/api/src/lib/local-hangar.ts": "e3836fc8097300d1f5249b183c80aa61f82c7ca0cb17346501b4467b8432baa5",
+    "apps/api/src/lib/hangar.ts": "655f1733295b1908414fcce7d99e488845fe6008da3daed7f730b0c15ea276db",
+    "apps/api/src/lib/local-browser-agent.ts": "872970c9665788f715b78906034a98e04a5f1d9d9edbc1dbe09b5b57d4392140",
+    "apps/api/src/lib/scrape-interact/browser-agent.ts": "2a77de38c19314e33706abe88001b4a58fe8cd17e0ffc88f44f920f3c0829771",
+    "apps/api/src/controllers/v2/browser.ts": "c9ed9b6a1eac268e1aeee88b7298c964bc1cb4e524d8d2c2a542d8a2cf5c702a",
+    "apps/api/src/lib/local-browser-job-store.ts": "3c617d681c5d99d394a865f8c12382ebc43b17840da78d14390c27fccd5588a2",
+    "apps/api/src/lib/job-access-store.ts": "88195e9c2e411735ef69dce8733cce6d6e9e6c275029ce9ea797487d7b2c6e49",
+    "apps/api/src/lib/job-state-store.ts": "305ce0d2e79f7591d60c6dde14b7ae62fff9ee52aab72ce95dc8a81955f35640",
+    "deployment/self-hosted-browser/hangar-compat.cjs": "27b825abe991156d1252c6c1ff2f4617499763cc05321239f077135205274933",
+    "deployment/self-hosted-browser/compile.cjs": "b1982980939bef7699629e7f733baff82924fed73c636d861a622bd6990cd13d",
+    "deployment/self-hosted-browser/deploy.py": "064406503791ad2dbe97b524a773a37668019b8d510a19348ef468f40c365dda",
+    "deployment/self-hosted-browser/003-agent-sponsors.sql": "16a8e0af7b304080634506383558d8162ac20d96903d0480650616409185d6d6"
+  },
+  "compiled": {
+    "/app/dist/src/lib/local-artifacts.js": "ce33a2db476fb54786c4cbfb900f63f928749e003c74c4872cc79b457397013c",
+    "/app/dist/src/lib/gcs-jobs.js": "c9a989af0bfd485ce7c1d20d858602592fcaf600e46850605f568fa7ccc1383b",
+    "/app/dist/src/lib/gcs-monitoring.js": "a6ef04123407b0c983fead6603a0ea8be1312f6424603f3427e134520e3832d2",
+    "/app/dist/src/lib/local-monitor-judge.js": "50430025a2d1c1493c393e0668fe90b320317f76cd4bedb00ffc8c6e349c4fc3",
+    "/app/dist/src/services/monitoring/judgeChange.js": "c1d7954afd859a95d305d111c6d4f5c53406847cbe215aefa303cbcf2bd0635c",
+    "/app/dist/src/services/logging/log_job.js": "3d1e68fe044b1c2b031763aef7190d9bab9af19a7303c18cd298d8618e006fe1",
+    "/app/dist/src/lib/local-hangar.js": "b7f380021b0287f4f4097832bf5393c1f6009d381ca08b67a8ed7c11680ec5e1",
+    "/app/dist/src/lib/hangar.js": "0868d9541fd7563ba8de1a9d5932c30bbe89f9c1e07925af009d2a3443470e26",
+    "/app/dist/src/lib/local-browser-agent.js": "ff29e9307467e0100b1661264474ff65ccf9bd2a64e253a966400f9c6a725c7f",
+    "/app/dist/src/lib/scrape-interact/browser-agent.js": "d6e9b3b73cf2a04a477306996f0b837e7bacb638b99b542aa85a6d13c067b4af",
+    "/app/dist/src/controllers/v2/browser.js": "25fcf42dabb8600b27295433530b867475b2921401b7c57c93c74ae9a47daeaa",
+    "/app/dist/src/lib/local-browser-job-store.js": "c0ef1edd9ad22e71c331bd09c3d2f68b836c9ab99365735d68b260d72e41fc39",
+    "/app/dist/src/lib/job-access-store.js": "d52e82294abdb37bd983d9ce621fc2d7e8042593c149d38c7b7e86e79cdbf723",
+    "/app/dist/src/lib/job-state-store.js": "f3f3b2ab09308a024b6e783eb21f10d842255e657df0ea0f1ad33baef3aefe92"
+  },
+  "base_compiled": {
+    "/app/dist/src/lib/browser-options.js": "1d0ba8050dc2185dc945283e09e94eaca0c0a06cdd019e71128f2aa23203976c",
+    "/app/dist/src/lib/browser-lifecycle.js": "9a497a3403a162bf99f012b3f00cf4fd44374c0f539fa2a39aea3f13e067408f",
+    "/app/dist/src/lib/browser-sessions.js": "86cedd4c6fb1e07be5b6a183490125d2fbcda640c0d3b53f4a8a04e53ddffe71",
+    "/app/dist/src/lib/scrape-interact/scrape-replay.js": "770151e8be18d8531dbb74c97b369100a918cf4fa538e8000acc2d7aa094dc12",
+    "/app/dist/src/controllers/v2/types.js": "916db660b9704b4a2b4a54e391f210a3db66f7314d75b01d74be140f8a80b124",
+    "/app/dist/src/routes/shared.js": "fbfc5f604df54e390c3f1d8b28fb4d7e91e0f9be755bfe9c43980b41119dec2f",
+    "/app/dist/src/services/billing/credit_billing.js": "7f65fba9978d6990ca3eb4ae8ee2702c83cea649fb3c18541168d1cc59607980",
+    "/app/dist/src/services/billing/agent-mcp-credits.js": "c44edc8b4629534954d860a9de80d8ed49e62d04f6fce1e369528b2668d66bba"
+  }
+}

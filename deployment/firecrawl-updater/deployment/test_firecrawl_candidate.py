@@ -127,6 +127,21 @@ else: raise SystemExit('unexpected Docker action')
         self.assertEqual(report['transport_check']['transport_profile'],'v2.11.473')
         self.assertEqual(report['review_basis']['receipt_sha256'],report['transport_check']['receipt_sha256'])
 
+    def test_629_profile_receipt_and_mixed_bytes(self):
+        spec = importlib.util.spec_from_file_location('profile_guard', GUARD)
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        profile = module.TRANSPORT_PROFILES['v2.11.629']
+        receipt = ROOT / 'deployment/firecrawl-transport-20261030-v629.json'
+        self.assertEqual(hashlib.sha256(receipt.read_bytes()).hexdigest(), profile['receipt_sha256'])
+        self.assertNotEqual(profile['hashes']['/app/dist/src/controllers/v2/types.js'],
+                            module.TRANSPORT_PROFILES['v2.11.625']['hashes']['/app/dist/src/controllers/v2/types.js'])
+        self.probe['hashes'] = copy.deepcopy(profile['hashes'])
+        self.probe['dependencies'] = copy.deepcopy(profile['dependencies'])
+        self.assertEqual(self.candidate('v2.11.629').returncode, 0)
+        self.assertEqual(json.loads((self.evidence/'checks.json').read_text())['transport_check']['transport_profile'], 'v2.11.629')
+        self.probe['hashes']['/app/dist/src/lib/exchange.js'] = 'f'*64
+        self.assertNotEqual(self.candidate('v2.11.629').returncode, 0)
+
     def test_new_tag_can_match_any_complete_supported_profile(self):
         spec=importlib.util.spec_from_file_location('supported_guard',GUARD)
         guard=importlib.util.module_from_spec(spec); spec.loader.exec_module(guard)

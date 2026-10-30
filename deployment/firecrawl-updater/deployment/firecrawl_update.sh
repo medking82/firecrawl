@@ -9,7 +9,7 @@ repo=${FIRECRAWL_REPO:-/home/marck/github/firecrawl}
 series=${FIRECRAWL_UPDATE_SERIES:-v2.11}
 canonical_state_dir=/home/marck/.local/state/firecrawl-updater
 state_dir=${FIRECRAWL_UPDATE_STATE_DIR:-$canonical_state_dir}
-guard_sha256=6fea544ad06987dd7735e8678257c60fb84f49e30bee9981439e8ce18b871889
+guard_sha256=07f73956c9531c483ccd9816af9b3aa06de87424dc0ab33758e9daa2c5e16c3d
 guard_file="$canonical_state_dir/guards/$guard_sha256.py"
 previous_commit=""
 previous_tag=""
@@ -21,6 +21,57 @@ candidate_evidence=""
 retired_agents=0
 
 log() { printf '%s %s\n' "$(date --iso-8601=seconds)" "$*"; }
+
+# Embedded in the updater by build-updater.py. Caller holds updater run.lock.
+sync_fork_main() {
+  local sync_dir work_dir origin_ref upstream_ref origin_oid upstream_oid merged_oid remote_origin remote_upstream
+  sync_dir=$(mktemp -d "$state_dir/fork-sync.XXXXXXXX") || return 1
+  work_dir="$sync_dir/worktree"
+  origin_ref="refs/firecrawl-updater/$(basename "$sync_dir")/origin"
+  upstream_ref="refs/firecrawl-updater/$(basename "$sync_dir")/upstream"
+  # Never mutate a branch or the running checkout; preserve exact fetched tips.
+  git fetch --no-tags origin "refs/heads/main:$origin_ref" || return 1
+  git fetch --no-tags upstream "refs/heads/main:$upstream_ref" || return 1
+  origin_oid=$(git rev-parse --verify "$origin_ref^{commit}") || return 1
+  upstream_oid=$(git rev-parse --verify "$upstream_ref^{commit}") || return 1
+  printf 'origin=%s\nupstream=%s\n' "$origin_oid" "$upstream_oid" >"$sync_dir/snapshots"
+  git worktree add --detach "$work_dir" "$origin_oid" || return 1
+  if git -C "$work_dir" merge-base --is-ancestor "$upstream_oid" "$origin_oid"; then
+    merged_oid=$origin_oid
+  elif git -C "$work_dir" merge-base --is-ancestor "$origin_oid" "$upstream_oid"; then
+    git -C "$work_dir" -c core.hooksPath=/dev/null merge --ff-only "$upstream_oid" || return 1
+    merged_oid=$(git -C "$work_dir" rev-parse HEAD) || return 1
+  else
+    if ! git -C "$work_dir" -c core.hooksPath=/dev/null -c user.name='Firecrawl Updater' -c user.email='firecrawl-updater@localhost' \
+      merge --no-edit --no-ff "$upstream_oid"; then
+      log "fork sync conflict or merge failure; preserved $sync_dir"
+      return 1
+    fi
+    merged_oid=$(git -C "$work_dir" rev-parse HEAD) || return 1
+    [[ $(git -C "$work_dir" rev-parse 'HEAD^1') == "$origin_oid" && $(git -C "$work_dir" rev-parse 'HEAD^2') == "$upstream_oid" ]] || return 1
+  fi
+  [[ -z $(git -C "$work_dir" status --porcelain --untracked-files=all) ]] || return 1
+  git merge-base --is-ancestor "$origin_oid" "$merged_oid" || return 1
+  git merge-base --is-ancestor "$upstream_oid" "$merged_oid" || return 1
+  git -C "$work_dir" diff --check "$origin_oid" "$merged_oid" || return 1
+  printf 'merged=%s\n' "$merged_oid" >>"$sync_dir/snapshots"
+  # Re-read both remote tips: a changed input requires a fresh run, never a force push.
+  remote_origin=$(git ls-remote --exit-code origin refs/heads/main) || return 1
+  remote_upstream=$(git ls-remote --exit-code upstream refs/heads/main) || return 1
+  [[ "$remote_origin" == "$origin_oid"$'\t'refs/heads/main && "$remote_upstream" == "$upstream_oid"$'\t'refs/heads/main ]] || {
+    log "fork sync remote moved; preserved $sync_dir"; return 1;
+  }
+  if [[ "$merged_oid" != "$origin_oid" ]]; then
+    git push origin "$merged_oid:refs/heads/main" || { log "fork sync push rejected; preserved $sync_dir"; return 1; }
+  fi
+  git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main || return 1
+  [[ $(git rev-parse refs/remotes/origin/main) == "$merged_oid" ]] || { log "fork changed after push; preserved $sync_dir"; return 1; }
+  printf 'status=complete\n' >>"$sync_dir/snapshots"
+  git worktree remove "$work_dir" || return 1
+  git update-ref -d "$origin_ref" "$origin_oid" || return 1
+  git update-ref -d "$upstream_ref" "$upstream_oid" || return 1
+  log "fork sync complete; evidence $sync_dir/snapshots"
+}
 
 validate_worktree() {
   local changes
@@ -718,8 +769,7 @@ PY
   fi
   set_restart_policy
   log "syncing medking82/firecrawl from firecrawl/firecrawl"
-  gh repo sync medking82/firecrawl --source firecrawl/firecrawl --branch main
-  git fetch --prune origin main
+  sync_fork_main
   git fetch --tags upstream
   latest_tag=$(git tag --list "${series}.*" --sort=-version:refname | sed -n '1p')
   [[ -n "$latest_tag" ]] || { log "no release tag found for ${series}.x"; return 1; }
