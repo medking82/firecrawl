@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "profile": "v2.11.625",
+  "scope": "Audited public static-fetch transport only; not whole-image safety or deployment approval",
+  "observed_source_tag": "v2.11.625",
+  "observed_source_commit": "180db64023c92f1f50ff0a81ab7d20ed02e64f9e",
+  "baseline_source_commit": "33f295dc1f09133c02fc1e096d6685abda3464a7",
+  "baseline_api_image": "sha256:14fe953dba83efaf225ae10dc6def8c3d14aae61de4de33f3ef7abec37442f7a",
+  "candidate_api_image": "sha256:cc3d761cdb32a6205a7e89dfbb255f452fb7b8fb484859494b4947e058d7a452",
+  "candidate_image_source_build": "sha256:60b9d4c732f9a6eaf6f63f361dd271f6085e28ed5ddfa6bfb0f485de594ed00c",
+  "prior_guard_sha256": "5905999db79aafbc592946bfdc9c15bea8e316f08342abe6e013e89c1f9aa7c0",
+  "dependencies": {"node_major": 22, "undici": "7.30.1", "ipaddr_js": "2.2.0"},
+  "undici_lib_sha256": "213bda9bf7c6860b6714484b606b431c7bdbe4652a20be22e3e20e8b96e1187c",
+  "changed_compiled_hashes": {
+    "/app/dist/src/controllers/v2/types.js": "f78ad7dc0f60ef4babcd1e794414560b48b82c40d0035544637f9b29d0e5ee72"
+  },
+  "audit": [
+    "The clean source-bound candidate was built from v2.11.625 commit 180db64023c92f1f50ff0a81ab7d20ed02e64f9e, and BUILD_SHA contains that commit. Its dependency-only image layer replaces vulnerable decode-uri-component and systeminformation packages using SHA-512 values in the reviewed API lockfile.",
+    "The previous installed guard probe and the full 116-file Undici lib tree match the v2.11.621 reviewed baseline, except for the compiled types.js hash. Dependencies, runtime predicates, and safeguards match.",
+    "The actual compiled types.js delta adds an optional safe boolean to the agent request schema. The other changes in the TypeScript source are type-only. This is outside the guarded scrape and search schemas.",
+    "The candidate scrape schema accepts and retains the existing protected markdown, fastMode, maxAge, storeInCache and timeout settings. The bounded web search schema also accepts its expected request.",
+    "This receipt does not certify the entire image or replace the updater dependency gate. The unpatched upstream candidate contains known vulnerable dependencies and must not be deployed. Unknown future transport changes remain blocked."
+  ],
+  "validation": [
+    "Isolated candidate and baseline probes used no network, mounts, credentials, or service entrypoint and compared the installed guard's complete transport hash set, dependencies, configuration predicates, and safeguards.",
+    "The exact Undici lib tree digest and file count match the previously audited v2.11.621 profile, so existing network-boundary regression evidence is reused.",
+    "The installed dependency audit rejected the unpatched source image and accepted the patched candidate. An independent Native Review and guarded deployment acceptance remain required."
+  ]
+}
