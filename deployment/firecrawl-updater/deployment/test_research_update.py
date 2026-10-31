@@ -224,8 +224,10 @@ gate() {
 main
 """
         args=['bash','-c',script,'fixture',str(SOURCE),str(root),scenario]
-        if background: return subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
-        return subprocess.run(args,capture_output=True,text=True,timeout=15)
+        # Fixtures must never reach the signed-in GitHub CLI or the real notice repository.
+        env=dict(os.environ,FIRECRAWL_NOTICE_GH=str(root/'no-gh'),FIRECRAWL_NOTICE_REPO='fixture/none')
+        if background: return subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,env=env)
+        return subprocess.run(args,capture_output=True,text=True,timeout=15,env=env)
 
     def test_preparation_allows_readers_serializes_runs_and_defers_busy_cutover(self):
         import fcntl

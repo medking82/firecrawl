@@ -130,7 +130,8 @@ class ApprovalFlowTests(unittest.TestCase):
         self.env = dict(git_env, PATH=str(self.bin) + os.pathsep + os.environ['PATH'], FIXTURE=str(self.fixture),
                         FIRECRAWL_REPO=str(self.repo), FIRECRAWL_UPDATE_STATE_DIR=str(self.state),
                         FIRECRAWL_WORKTREE_ROOT=str(self.worktrees), FIRECRAWL_SECURITY_REFRESH=str(refresh),
-                        FIRECRAWL_SECURITY_STATE=str(self.security), FIRECRAWL_NOTICE_REPO='owner/alerts')
+                        FIRECRAWL_SECURITY_STATE=str(self.security), FIRECRAWL_NOTICE_REPO='owner/alerts',
+                        FIRECRAWL_NOTICE_GH=str(self.bin / 'gh'))
 
     def git(self, *args):
         subprocess.run(['git', *args], check=True, capture_output=True, env=self.git_env)
