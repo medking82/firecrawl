@@ -183,6 +183,7 @@ class FakeBackend(http.server.BaseHTTPRequestHandler):
         size = int(self.headers.get('Content-Length', '0'))
         body = self.rfile.read(size)
         self.server.calls.append((self.path, body, self.headers.get('Authorization')))
+        self.server.hosts.append(self.headers.get('Host'))
         if getattr(self.server, 'response_factory', None):
             status, value = self.server.response_factory(self.path, json.loads(body))
         elif self.path in ('/v1/search', '/v2/search'):
@@ -208,6 +209,7 @@ class ProxyTests(unittest.TestCase):
     def setUpClass(cls):
         cls.backend = http.server.ThreadingHTTPServer(('127.0.0.1', 0), FakeBackend)
         cls.backend.calls = []
+        cls.backend.hosts = []
         cls.fallback = Mock(return_value=[GOOD])
         cls.server = proxy.Server(('127.0.0.1', 0), cls.backend.server_address, cls.fallback)
         for server in (cls.backend, cls.server):
@@ -242,6 +244,16 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(d['data']['echo'], body)
         self.assertEqual(headers['X-Original'], 'preserved')
         self.assertEqual(self.backend.calls[-1][2], 'test-local-only')
+    def test_client_host_reaches_backend_so_job_urls_stay_reachable(self):
+        # Firecrawl builds crawl/batch status URLs from Host. Through the SSH tunnel the
+        # client calls 127.0.0.1:13002; a backend Host of 127.0.0.1:3002 sent the MCP
+        # crawl poll to a port that does not exist on the client.
+        c = http.client.HTTPConnection(*self.server.server_address, timeout=3)
+        c.request('POST', '/v2/crawl', body=b'{"url": "https://example.org/"}',
+                  headers={'Content-Type': 'application/json', 'Host': '127.0.0.1:13002'})
+        self.assertEqual(c.getresponse().status, 200)
+        c.close()
+        self.assertEqual(self.backend.hosts[-1], '127.0.0.1:13002')
     def test_reject_baidu_before_backend(self):
         before = len(self.backend.calls)
         self.assertEqual(self.request('/v2/scrape', {'url': 'https://baike.baidu.com/'})[0], 400)

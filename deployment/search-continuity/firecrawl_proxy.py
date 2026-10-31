@@ -110,7 +110,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return parts()
 
     def forward_headers(self):
-        skip = HOP | {'host', 'content-length', 'accept-encoding'}
+        # Host passes through (already checked to be loopback): Firecrawl builds job
+        # status URLs from it, and clients reach this proxy on another port (13002).
+        skip = HOP | {'content-length', 'accept-encoding'}
         skip |= {x.strip().lower() for x in self.headers.get('Connection', '').split(',')}
         return {k: v for k, v in self.headers.items() if k.lower() not in skip}
 
