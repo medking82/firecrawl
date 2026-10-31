@@ -102,4 +102,12 @@ class Policy(unittest.TestCase):
                 self.assertTrue((root/'admission-paused').exists())
 
 
+    def test_docker29_null_dns_lists_are_not_configuration_drift(self):
+        def config(**dns): return {'config': {}, 'host_config': {'NetworkMode': 'firecrawl_backend', **dns}, 'mounts': []}
+        empty = config(Dns=[], DnsOptions=[], DnsSearch=[])
+        self.assertEqual(s.normalize_api_configuration(config(Dns=None, DnsOptions=None, DnsSearch=None)), empty)
+        self.assertNotEqual(s.normalize_api_configuration(config(Dns=['1.1.1.1'], DnsOptions=None, DnsSearch=None)), empty)
+        self.assertEqual(s.normalize_api_configuration(config()), config())
+
+
 if __name__ == '__main__': unittest.main()

@@ -41,11 +41,22 @@ def status_report(value):
     save(ROOT / 'latest.json', {**value, 'completed_at': dt.datetime.now(dt.timezone.utc).isoformat()})
 
 
+def normalize_api_configuration(value):
+    """Docker 29 reports empty DNS lists as null after recreate; same runtime."""
+    host = value.get('host_config')
+    if isinstance(host, dict):
+        for key in ('Dns', 'DnsOptions', 'DnsSearch'):
+            if key in host and host[key] is None: host[key] = []
+    return value
+
+
 def helper():
     if HELPER.is_symlink() or hashlib.sha256(HELPER.read_bytes()).hexdigest() != HELPER_SHA:
         raise RuntimeError('deployment helper changed')
     spec = importlib.util.spec_from_file_location('refresh_promote', HELPER)
     p = importlib.util.module_from_spec(spec); spec.loader.exec_module(p)
+    raw = p.api_configuration
+    p.api_configuration = lambda row: normalize_api_configuration(raw(row))
     return p
 
 
