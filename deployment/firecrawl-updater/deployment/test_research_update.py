@@ -175,6 +175,18 @@ verify_candidate_manifest() { record manifest; [[ "$scenario" != manifest-fail ]
 docker() { record deploy; [[ "$scenario" != rollback-fail && "$scenario" != deploy-fail ]]; }
 restore_images() { record restore; [[ "$scenario" != rollback-fail ]]; }
 smoke_test() { record smoke; }
+timeout() { record security-refresh; }
+# Cutover scenarios carry an Owner approval; preparation scenarios do not.
+gate() {
+  case "$1" in
+    approved)
+      case "$scenario" in prepare-pause|admission-fail) return 3 ;; esac
+      printf '%s\n' "$state_dir/candidate.fixture1" "$state_dir/update" "$(printf '%064d' 0)" ;;
+    ready|blocked) return 3 ;;
+    config) return 0 ;;
+    *) record "gate $1" ;;
+  esac
+}
 main
 """
         args=['bash','-c',script,'fixture',str(SOURCE),str(root),scenario]
@@ -202,10 +214,17 @@ main
                     self.assertIn('already running',second.stdout)
                     (root/'state/continue').touch()
                     output,error=child.communicate(timeout=8)
-                    self.assertNotEqual(child.returncode,0,error)
-                    self.assertIn('active page reads deferred cutover',output)
-                    calls=(root/'state/calls').read_text()
-                    self.assertNotIn('deploy',calls); self.assertNotIn('checkout',calls)
+                    self.assertEqual(child.returncode,0,error)
+                    self.assertIn('awaiting Owner approval',output)
+                    calls=(root/'state/calls').read_text().splitlines()
+                    self.assertIn('gate receipt',calls)
+                    self.assertNotIn('deploy',calls); self.assertFalse(any(x.startswith('checkout') for x in calls))
+                    # An approved cutover never interrupts an active guarded read.
+                    approved=self.run_owner(root,'compatible')
+                    self.assertEqual(approved.returncode,0,approved.stderr)
+                    self.assertIn('approved cutover deferred: active page reads',approved.stdout)
+                    calls=(root/'state/calls').read_text().splitlines()
+                    self.assertNotIn('snapshot',calls); self.assertNotIn('gate consume',calls); self.assertNotIn('deploy',calls)
                 self.assertFalse((root/'state/deployed.env').exists())
             finally:
                 if child.poll() is None: child.kill(); child.communicate()
@@ -227,10 +246,13 @@ main
             root=Path(temp); result=self.run_owner(root,'compatible')
             self.assertEqual(result.returncode,0,result.stderr)
             calls=(root/'state/calls').read_text().splitlines()
-            self.assertLess(calls.index('candidate'),calls.index('snapshot'))
-            self.assertLess(calls.index('snapshot'),next(i for i,x in enumerate(calls) if x.startswith('checkout')))
+            # The approved candidate was built and admitted by an earlier run.
+            self.assertNotIn('candidate',calls)
+            self.assertLess(calls.index('snapshot'),calls.index('gate consume'))
+            self.assertLess(calls.index('gate consume'),next(i for i,x in enumerate(calls) if x.startswith('checkout')))
             self.assertLess(calls.index('manifest'),calls.index('deploy'))
             self.assertLess(calls.index('deploy'),calls.index('smoke'))
+            self.assertLess(calls.index('gate retire'),calls.index('security-refresh'))
             self.assertNotIn('restore',calls)
             self.assertIn('tag=v2.11.999',(root/'state/deployed.env').read_text())
 
@@ -267,6 +289,34 @@ main
                 else:
                     self.assertIn('rollback restored previous',result.stdout)
                     self.assertIn('smoke',calls)
+
+    def test_first_upgrade_owner_install_requires_absent_target_and_installs_reviewed_units(self):
+        from deployment import install_firecrawl_update as owner
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); units = root / 'units'
+            target = root / 'firecrawl-upgrade'
+            lock = root / 'update.lock'; lock.touch(); lock.chmod(0o600)
+            guard = root / 'transport.py'; guard.write_bytes(b'# reviewed transport guard\n')
+            digest = hashlib.sha256(guard.read_bytes()).hexdigest()
+            source = root / 'candidate.sh'; source.write_bytes(('#!/usr/bin/env bash\nguard_sha256='+digest+'\n').encode())
+            sources = [SOURCE.parent.parent / name for name in owner.UNIT_NAMES]
+            with patch.object(owner, 'ROOT', root), patch.object(owner, 'TARGET', target), \
+                    patch.object(owner, 'UNITS', units), patch.object(owner, 'install_restart_override'):
+                target.write_bytes(b'someone else')
+                with self.assertRaisesRegex(ValueError, 'Expected updater state'):
+                    owner.install(source, 'absent', guard, sources)
+                target.unlink()
+                result = owner.install(source, 'absent', guard, sources)
+                self.assertEqual(result['status'], 'installed')
+                self.assertEqual(target.read_bytes(), source.read_bytes())
+                self.assertFalse(list(root.glob('*.before.sh')))
+                for unit in sources:
+                    self.assertEqual((units / unit.name).read_bytes(), unit.read_bytes())
+                    self.assertEqual(result['units'][unit.name], hashlib.sha256(unit.read_bytes()).hexdigest())
+                stray = root / 'other.service'; stray.write_text('[Unit]\n')
+                source.write_bytes(source.read_bytes() + b'# next\n')
+                with self.assertRaisesRegex(ValueError, 'Unexpected unit source'):
+                    owner.install(source, hashlib.sha256(target.read_bytes()).hexdigest(), guard, [stray])
 
     def test_installer_preserves_a_changed_updater_and_records_only_exact_replacement(self):
         from deployment import install_firecrawl_update as owner

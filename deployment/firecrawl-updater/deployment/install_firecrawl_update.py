@@ -43,13 +43,9 @@ def install_restart_override():
 
 
 
-def install_units(units):
-    """Install the reviewed timer units; enabling them stays a separate Owner step."""
-    result = {}
-    if any(p.is_symlink() for p in (UNITS, *UNITS.parents)):
-        raise ValueError('Linked unit directory rejected.')
-    UNITS.mkdir(parents=True, exist_ok=True)
-    backups = ROOT / 'units'
+def read_units(units):
+    """Validate every reviewed unit before the updater or any unit changes."""
+    result = []
     for unit in units:
         if unit.name not in UNIT_NAMES or unit.is_symlink() or not unit.is_file():
             raise ValueError('Unexpected unit source.')
@@ -59,15 +55,28 @@ def install_units(units):
         target = UNITS / unit.name
         if target.is_symlink() or (target.exists() and not target.is_file()):
             raise ValueError('Linked or unusual unit target rejected.')
+        result.append((unit.name, data))
+    if any(p.is_symlink() for p in (UNITS, *UNITS.parents)):
+        raise ValueError('Linked unit directory rejected.')
+    return result
+
+
+def install_units(units):
+    """Install the reviewed timer units; enabling them stays a separate Owner step."""
+    result = {}
+    UNITS.mkdir(parents=True, exist_ok=True)
+    backups = ROOT / 'units'
+    for name, data in units:
+        target = UNITS / name
         if target.exists() and target.read_bytes() != data:
             backups.mkdir(mode=0o700, exist_ok=True)
             old = target.read_bytes()
-            with (backups / (unit.name + '.' + hashlib.sha256(old).hexdigest() + '.before')).open('wb') as stream: stream.write(old)
-        temporary = target.with_name('.' + unit.name + '.installing')
+            with (backups / (name + '.' + hashlib.sha256(old).hexdigest() + '.before')).open('wb') as stream: stream.write(old)
+        temporary = target.with_name('.' + name + '.installing')
         with temporary.open('xb') as stream: stream.write(data)
         temporary.chmod(0o600)
         temporary.replace(target)
-        result[unit.name] = hashlib.sha256(data).hexdigest()
+        result[name] = hashlib.sha256(data).hexdigest()
     return result
 
 
@@ -81,6 +90,7 @@ def install(source, expected_before, guard_source, units=()):
     present = TARGET.is_file() if expected_before != 'absent' else not TARGET.exists()
     if not ROOT.is_dir() or not present or source.is_symlink() or not source.is_file() or guard_source.is_symlink() or not guard_source.is_file():
         raise ValueError('Expected updater state and reviewed source required.')
+    units = read_units(units)
     after = source.read_bytes()
     if not after.startswith(b'#!/usr/bin/env bash\n'):
         raise ValueError('Unexpected updater source.')
