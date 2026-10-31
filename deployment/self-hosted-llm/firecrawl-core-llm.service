@@ -1,0 +1,18 @@
+[Unit]
+Description=Firecrawl core API model bridge to opencodex-proxy
+After=opencodex-proxy.service
+
+[Service]
+Type=simple
+ExecStartPre=/usr/bin/python3 -B %h/services/firecrawl-security/releases/core-llm-bridge/llm_bridge.py --init
+ExecStart=/usr/bin/python3 -B -u %h/services/firecrawl-security/releases/core-llm-bridge/llm_bridge.py
+Environment=FIRECRAWL_CORE_LLM_MODELS=gpt-6-luna--fast
+UMask=0077
+# docker0 can appear after the user manager starts; keep retrying until it binds.
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target
