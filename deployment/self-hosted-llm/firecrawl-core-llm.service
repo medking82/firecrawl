@@ -6,7 +6,8 @@ After=opencodex-proxy.service
 Type=simple
 ExecStartPre=/usr/bin/python3 -B %h/services/firecrawl-security/releases/core-llm-bridge/llm_bridge.py --init
 ExecStart=/usr/bin/python3 -B -u %h/services/firecrawl-security/releases/core-llm-bridge/llm_bridge.py
-Environment=FIRECRAWL_CORE_LLM_MODELS=gpt-6-luna--fast
+Environment=FIRECRAWL_CORE_LLM_MODELS=gpt-6.1-terra
+Environment=FIRECRAWL_CORE_LLM_EFFORT=low
 UMask=0077
 # docker0 can appear after the user manager starts; keep retrying until it binds.
 Restart=always

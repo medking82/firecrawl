@@ -26,7 +26,9 @@ CONTAINER = 'firecrawl-api-1'
 STATE = Path.home() / '.local/state/firecrawl-core-llm'
 KEY_FILE = STATE / 'bridge-key'
 TOKEN_FILE = Path.home() / '.opencodex/service-api-token'
-MODELS = ('gpt-6-luna--fast',)
+MODELS = ('gpt-6.1-terra',)
+EFFORT = 'low'
+EFFORTS = ('none', 'minimal', 'low', 'medium', 'high', 'xhigh')
 PATHS = ('/v1/responses', '/v1/chat/completions')
 MAX_BODY = 16 * 1024 * 1024
 HOP = {'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
@@ -115,13 +117,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.reply(411, 'content_length_required')
         if not 0 < size <= MAX_BODY:
             return self.reply(413, 'body_limit')
-        raw = self.rfile.read(size)
         try:
-            model = json.loads(raw).get('model')
+            body = json.loads(self.rfile.read(size))
+            model = body.get('model')
         except (ValueError, UnicodeError, AttributeError):
             return self.reply(400, 'invalid_json')
         if model not in self.server.models:
             return self.reply(400, 'model_not_allowed')
+        effort = self.server.effort
+        # The core API never sends an effort, and opencodex has no `<model>--<effort>` id
+        # for ChatGPT models, so the configured effort is added unless the caller set one.
+        if effort and self.path == '/v1/responses' and not isinstance(body.get('reasoning'), dict):
+            body['reasoning'] = {'effort': effort}
+        elif effort and self.path == '/v1/responses':
+            body['reasoning'].setdefault('effort', effort)
+        elif effort:
+            body.setdefault('reasoning_effort', effort)
+        raw = json.dumps(body).encode()
         if not self.server.slots.acquire(blocking=False):
             return self.reply(429, 'bridge_busy')
         started, upstream, sent = time.monotonic(), None, False
@@ -144,7 +156,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.wfile.write(data)
                 self.wfile.flush()
             self.close_connection = True
-            self.event(status=response.status, model=model, route=self.path,
+            self.event(status=response.status, model=model, route=self.path, effort=effort,
                        seconds=round(time.monotonic() - started, 2))
         except (OSError, http.client.HTTPException):
             if not sent:
@@ -165,13 +177,13 @@ class Server(http.server.ThreadingHTTPServer):
     daemon_threads = True
 
     def __init__(self, address=LISTEN, upstream=UPSTREAM, peers=None, key_file=KEY_FILE,
-                 token_file=TOKEN_FILE, models=MODELS, slots=4):
+                 token_file=TOKEN_FILE, models=MODELS, slots=4, effort=EFFORT):
         if upstream[0] != '127.0.0.1':
             raise ValueError('upstream must be loopback')
         super().__init__(address, Handler)
         self.upstream, self.key_file, self.token_file = upstream, key_file, token_file
         self.peers = peers or Peers()
-        self.models = frozenset(models)
+        self.models, self.effort = frozenset(models), effort or None
         self.slots = threading.BoundedSemaphore(slots)
 
 
@@ -185,7 +197,10 @@ def main():
     models = tuple(m for m in os.environ.get('FIRECRAWL_CORE_LLM_MODELS', ','.join(MODELS)).split(',') if m)
     if not read_secret(KEY_FILE):
         raise SystemExit('bridge key missing; run with --init first')
-    with Server(models=models) as server:
+    effort = os.environ.get('FIRECRAWL_CORE_LLM_EFFORT', EFFORT)
+    if effort and effort not in EFFORTS:
+        raise SystemExit('unknown FIRECRAWL_CORE_LLM_EFFORT')
+    with Server(models=models, effort=effort) as server:
         server.serve_forever()
 
 

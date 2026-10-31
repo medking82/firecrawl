@@ -73,6 +73,26 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual([c[0] for c in self.upstream.calls], list(bridge.PATHS))
         self.assertEqual({c[2] for c in self.upstream.calls}, {'Bearer host-token'})
 
+    def test_configured_effort_is_added_unless_the_caller_set_one(self):
+        self.call('/v1/responses')
+        self.call('/v1/responses', {'model': 'gpt-6-luna--fast', 'reasoning': {'summary': 'auto'}})
+        self.call('/v1/responses', {'model': 'gpt-6-luna--fast', 'reasoning': {'effort': 'high'}})
+        self.call('/v1/chat/completions', {'model': 'gpt-6-luna--fast', 'messages': []})
+        self.call('/v1/chat/completions', {'model': 'gpt-6-luna--fast', 'reasoning_effort': 'medium'})
+        bodies = [c[1] for c in self.upstream.calls]
+        self.assertEqual([b.get('reasoning') for b in bodies[:3]],
+                         [{'effort': 'low'}, {'summary': 'auto', 'effort': 'low'}, {'effort': 'high'}])
+        self.assertEqual([b['reasoning_effort'] for b in bodies[3:]], ['low', 'medium'])
+        self.assertEqual(bodies[0]['input'], 'x')
+
+    def test_no_effort_configured_leaves_body_unchanged(self):
+        self.server.effort = None
+        try:
+            self.call('/v1/responses')
+        finally:
+            self.server.effort = bridge.EFFORT
+        self.assertEqual(self.upstream.calls[-1][1], {'model': 'gpt-6-luna--fast', 'input': 'x'})
+
     def test_missing_host_token_sends_no_authorization(self):
         self.assertEqual(self.call()[0], 200)
         self.assertIsNone(self.upstream.calls[-1][2])
