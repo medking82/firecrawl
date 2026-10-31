@@ -149,10 +149,11 @@ smoke_test() {
 
   # Run only Firecrawl-owned checks against the self-hosted loopback endpoint.
   python3 -B - "$guard_file" "$guard_sha256" 'http://127.0.0.1:3002' <<'PYSMOKE'
-import hashlib, json, os, stat, sys, types, urllib.request
+import hashlib, json, os, stat, sys, time, types, urllib.request
 from pathlib import Path
 
 path, expected, endpoint = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+delay = float(sys.argv[4]) if len(sys.argv) > 4 else 15
 failure = 'guard_unavailable'
 try:
     if any(item.is_symlink() for item in (path, *path.parents)):
@@ -185,16 +186,29 @@ try:
         if not isinstance(value, dict) or value.get('success') is not True:
             raise ValueError()
         return value.get('data')
+    def attempt(check):
+        # Public search engines intermittently block automated queries; a single
+        # external refusal must not roll back an otherwise healthy release.
+        for remaining in (2, 1, 0):
+            try:
+                return check()
+            except Exception:
+                if not remaining: raise
+                time.sleep(delay)
+    def search():
+        result = post('/v2/search', {'query':'Firecrawl documentation','limit':1})
+        if not isinstance(result, dict) or not isinstance(result.get('web'), list) or not result['web']:
+            raise ValueError()
+    def scrape():
+        result = post('/v2/scrape', {'url':'https://example.com','formats':['markdown'],
+                      'fastMode':True,'timeout':60000,'maxAge':0,'storeInCache':False})
+        if (not isinstance(result, dict) or not isinstance(result.get('markdown'), str)
+                or not result['markdown'].strip() or (result.get('metadata') or {}).get('statusCode') != 200):
+            raise ValueError()
     failure = 'search_failed'
-    result = post('/v2/search', {'query':'Firecrawl documentation','limit':1})
-    if not isinstance(result, dict) or not isinstance(result.get('web'), list) or not result['web']:
-        raise ValueError()
+    attempt(search)
     failure = 'scrape_failed'
-    result = post('/v2/scrape', {'url':'https://example.com','formats':['markdown'],
-                  'fastMode':True,'timeout':60000,'maxAge':0,'storeInCache':False})
-    if (not isinstance(result, dict) or not isinstance(result.get('markdown'), str)
-            or not result['markdown'].strip() or (result.get('metadata') or {}).get('statusCode') != 200):
-        raise ValueError()
+    attempt(scrape)
 except Exception:
     raise SystemExit('Firecrawl smoke failed: ' + failure) from None
 print('Firecrawl transport, search and scrape smoke passed')
