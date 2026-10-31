@@ -2,14 +2,20 @@
 
 No installation side effects. Start only with an explicit unused loopback port.
 Non-search routes stream to the fixed local Firecrawl backend without redirects.
+Monitor and browser/interact routes go to the separate GA401 monitor and browser
+services, which enforce database authentication; the proxy adds their local key.
 """
 import argparse
+import collections
 import http.client
 import http.server
 import json
+import re
 import socket
 import threading
+import time
 import urllib.parse
+from pathlib import Path
 
 import search_continuity as policy
 
@@ -17,11 +23,68 @@ BACKEND = ('127.0.0.1', 3002)
 HOP = {'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
        'te', 'trailer', 'transfer-encoding', 'upgrade'}
 MAX_JSON = 64 * 1024 * 1024
+SHARED = Path.home() / 'services'
+# Local services whose private client.json holds the API key of their own tenant.
+SERVICES = {
+    'monitor': (('127.0.0.1', 3006), SHARED / 'firecrawl-monitor/shared/client.json'),
+    'browser': (('127.0.0.1', 3007), SHARED / 'firecrawl-browser/shared/client.json'),
+}
+INTERACT = re.compile(r'/v2/scrape/([^/]+)/interact', re.IGNORECASE)
+# Options the browser service replays; it fails closed on proxies, profiles and the like.
+REPLAY_OPTIONS = ('waitFor', 'actions', 'headers', 'timeout', 'skipTlsVerification')
+INTERACT_TIMEOUT = 360.0
 
 
 class BackendReply(Exception):
     def __init__(self, status, headers, raw):
         self.status, self.headers, self.raw = status, headers, raw
+
+
+def service_route(path):
+    for name, prefixes in (('monitor', ('/v2/monitor',)), ('browser', ('/v2/browser', '/v2/interact'))):
+        if any(path == p or path.startswith(p + '/') for p in prefixes):
+            return name
+    return None
+
+
+def service_key(path):
+    try:
+        value = json.loads(Path(path).read_text()).get('api_key')
+    except (OSError, ValueError, AttributeError):
+        value = None
+    if not isinstance(value, str) or not value:
+        raise policy.SearchFailure('local_service_unconfigured', 503)
+    return value
+
+
+def replay_request(body):
+    """Browser-service scrape that loads the page a core scrape fetched."""
+    replay = {'url': body['url'], 'formats': ['markdown'], 'blockAds': False, 'maxAge': 0}
+    replay.update({k: body[k] for k in REPLAY_OPTIONS if k in body})
+    return replay
+
+
+class Recent:
+    """Bounded in-memory map with expiry; 24 hours matches browser scrape access."""
+    def __init__(self, size=2048, ttl=86400):
+        self.size, self.ttl = size, ttl
+        self.items = collections.OrderedDict()
+        self.lock = threading.Lock()
+
+    def put(self, key, value):
+        with self.lock:
+            self.items.pop(key, None)
+            self.items[key] = (time.monotonic() + self.ttl, value)
+            while len(self.items) > self.size:
+                self.items.popitem(last=False)
+
+    def get(self, key):
+        with self.lock:
+            row = self.items.get(key)
+            if row and row[0] > time.monotonic():
+                return row[1]
+            self.items.pop(key, None)
+            return None
 
 
 def backend_timeout(body=None):
@@ -144,6 +207,52 @@ class Handler(http.server.BaseHTTPRequestHandler):
         finally:
             connection.close()
 
+    def remember_scrape(self, raw, body):
+        if len(raw) > MAX_JSON:
+            return
+        try:
+            scrape_id = json.loads(raw)['data']['metadata']['scrapeId']
+        except (ValueError, UnicodeError, KeyError, TypeError):
+            return
+        if isinstance(scrape_id, str) and scrape_id:
+            self.server.scrapes.put(scrape_id, replay_request(body))
+
+    def interact_target(self, scrape_id, headers):
+        """Map a core scrape ID to a browser-service scrape of the same page.
+
+        The core API keeps no scrape context (database authentication is off), so
+        the first interact loads the page once on the browser service and later
+        calls reuse that scrape. IDs the proxy never saw pass through unchanged.
+        """
+        mapped = self.server.browser_scrapes.get(scrape_id)
+        replay = self.server.scrapes.get(scrape_id)
+        if mapped or self.command != 'POST' or replay is None:
+            return mapped or scrape_id
+        with self.server.replay_lock:
+            mapped = self.server.browser_scrapes.get(scrape_id)
+            if mapped:
+                return mapped
+            connection = http.client.HTTPConnection(*self.server.services['browser'][0],
+                                                    timeout=backend_timeout(replay))
+            try:
+                connection.request('POST', '/v2/scrape', body=json.dumps(replay).encode(), headers={
+                    **{k: v for k, v in headers.items() if k.lower() != 'content-type'},
+                    'Content-Type': 'application/json'})
+                response = connection.getresponse()
+                result = response.read(MAX_JSON + 1)
+                if response.status != 200:
+                    raise BackendReply(response.status, response.getheaders(), result)
+                try:
+                    mapped = json.loads(result)['data']['metadata']['scrapeId']
+                except (ValueError, UnicodeError, KeyError, TypeError):
+                    mapped = None
+                if not isinstance(mapped, str) or not mapped:
+                    raise policy.SearchFailure('interact_replay_failed', 502)
+            finally:
+                connection.close()
+            self.server.browser_scrapes.put(scrape_id, mapped)
+            return mapped
+
     def handle_proxy(self):
         connection = None
         sent = False
@@ -185,16 +294,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         result['data'] = result['data'].get('web', [])
                     self.reply(200, result)
                     return
-            # All other existing REST routes remain on the original backend.
-            # Stream both uploads and replies; keep response bytes/status intact.
-            connection = http.client.HTTPConnection(*self.server.backend, timeout=backend_timeout(body))
+            # Other REST routes remain on the original backend, except monitor and
+            # browser routes. Stream uploads and replies; keep response bytes/status intact.
+            backend, target, timeout = self.server.backend, self.path, backend_timeout(body)
             headers = self.forward_headers()
+            # Match before lowercasing so scrape IDs keep their case.
+            interact = INTERACT.fullmatch(urllib.parse.unquote(parsed.path).rstrip('/'))
+            service = 'browser' if interact else service_route(path)
+            if service:
+                backend, key_file = self.server.services[service]
+                headers = {k: v for k, v in headers.items() if k.lower() != 'authorization'}
+                headers['Authorization'] = 'Bearer ' + service_key(key_file)
+            if interact:
+                scrape_id = self.interact_target(interact.group(1), headers)
+                target = '/v2/scrape/' + urllib.parse.quote(scrape_id, safe='') + '/interact'
+                target += '?' + parsed.query if parsed.query else ''
+                timeout = INTERACT_TIMEOUT
+            record = (not service and self.command == 'POST' and path == '/v2/scrape'
+                      and isinstance(body, dict) and isinstance(body.get('url'), str))
+            connection = http.client.HTTPConnection(*backend, timeout=timeout)
             if raw is None and self.headers.get('Content-Length') is not None:
                 headers['Content-Length'] = self.headers['Content-Length']
             payload = bytes(raw) if raw is not None else (parts if self.headers.get('Content-Length') or self.headers.get('Transfer-Encoding') else None)
-            connection.request(self.command, self.path, body=payload, headers=headers,
+            connection.request(self.command, target, body=payload, headers=headers,
                                encode_chunked=raw is None and 'Content-Length' not in headers)
             response = connection.getresponse()
+            first = b''
+            if record and response.status == 200:
+                # Buffer the scrape reply once to learn its ID; bytes are sent unchanged.
+                first = response.read(MAX_JSON + 1)
+                self.remember_scrape(first, body)
             self.send_response(response.status)
             skip = HOP | {'server', 'date'}
             skip |= {x.strip().lower() for x in response.getheader('Connection', '').split(',')}
@@ -204,6 +333,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header('Connection', 'close')
             self.end_headers()
             sent = True
+            if first:
+                self.wfile.write(first)
             if self.command != 'HEAD':
                 while data := response.read1(65536):
                     self.wfile.write(data)
@@ -243,11 +374,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 class Server(http.server.ThreadingHTTPServer):
     daemon_threads = True
-    def __init__(self, address, backend=BACKEND, fallback=policy.exa_search):
-        if address[0] != '127.0.0.1' or backend[0] != '127.0.0.1':
+    def __init__(self, address, backend=BACKEND, fallback=policy.exa_search, services=None):
+        services = SERVICES if services is None else services
+        if address[0] != '127.0.0.1' or backend[0] != '127.0.0.1' or any(
+                target[0] != '127.0.0.1' for target, _ in services.values()):
             raise ValueError('Only fixed loopback listeners/backends are allowed')
         super().__init__(address, Handler)
-        self.backend, self.fallback = backend, fallback
+        self.backend, self.fallback, self.services = backend, fallback, services
+        self.scrapes, self.browser_scrapes = Recent(), Recent()
+        self.replay_lock = threading.Lock()
         self.fallback_gate = policy.FallbackGate()
         self.slots = threading.BoundedSemaphore(16)
 

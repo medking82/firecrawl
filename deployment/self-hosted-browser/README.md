@@ -18,6 +18,16 @@ configuration. Windows `FIRECRAWL_API_URL` remains `http://127.0.0.1:13002`.
 Browser calls explicitly load the private
 `%USERPROFILE%\.local\state\firecrawl-browser\client.json`, verify its `api_url`
 equals `http://127.0.0.1:13007`, and send its API key only as a bearer header.
+
+For the single-URL Firecrawl MCP, the search-continuity proxy behind `13002`
+(GA401 `3003`) sends `/v2/browser*`, `/v2/interact*` and
+`/v2/scrape/:scrapeId/interact` here with this tenant's key. The core API keeps
+no scrape context, so the proxy remembers each core scrape ID for 24 hours (in
+memory, at most 2048) and the first interact loads the same URL once on this
+service with `formats: ["markdown"]`, `blockAds: false`, `maxAge: 0` and only
+`waitFor`, `actions`, `headers`, `timeout` and `skipTlsVerification` from the
+original. Later interact and stop calls with the core ID reuse that scrape. IDs
+the proxy never saw pass through unchanged; after a proxy restart, scrape again.
 Do not print credentials or CDP capability URLs, or put credentials in argv.
 
 Host releases live below `/home/marck/services/firecrawl-browser/releases/`;

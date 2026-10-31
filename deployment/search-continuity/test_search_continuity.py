@@ -334,5 +334,153 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(self.request('https://baidu.com/v2/search', {'query': 'q'})[0], 400)
 
 
+class FakeService(http.server.BaseHTTPRequestHandler):
+    """Records every call; replies through the server's factory or a plain echo."""
+    def log_message(self, *args): pass
+    def handle_any(self):
+        size = int(self.headers.get('Content-Length', '0'))
+        body = json.loads(self.rfile.read(size)) if size else None
+        self.server.calls.append({'method': self.command, 'path': self.path, 'body': body,
+                                  'auth': self.headers.get('Authorization'), 'host': self.headers.get('Host')})
+        status, value = self.server.factory(self.command, self.path, body)
+        raw = json.dumps(value).encode()
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+    do_GET = do_POST = do_DELETE = do_PUT = do_PATCH = handle_any
+
+
+def echo(method, path, body):
+    return 200, {'success': True, 'echo': {'method': method, 'path': path}}
+
+
+class ServiceRouteTests(unittest.TestCase):
+    """Monitor and browser routes reach their own authenticated GA401 services."""
+    @classmethod
+    def setUpClass(cls):
+        cls.keys = tempfile.TemporaryDirectory()
+        cls.servers = {}
+        for name in ('core', 'monitor', 'browser'):
+            server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), FakeService)
+            server.calls, server.factory = [], echo
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            cls.servers[name] = server
+        services = {}
+        for name in ('monitor', 'browser'):
+            key_file = Path(cls.keys.name) / (name + '.json')
+            key_file.write_text(json.dumps({'api_key': 'fc-' + name + '-key'}))
+            services[name] = (cls.servers[name].server_address, key_file)
+        cls.server = proxy.Server(('127.0.0.1', 0), cls.servers['core'].server_address, Mock(), services)
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+    @classmethod
+    def tearDownClass(cls):
+        for server in [cls.server, *cls.servers.values()]:
+            server.shutdown()
+            server.server_close()
+        cls.keys.cleanup()
+    def setUp(self):
+        for server in self.servers.values():
+            server.calls.clear()
+            server.factory = echo
+    def request(self, method, path, body=None):
+        c = http.client.HTTPConnection(*self.server.server_address, timeout=5)
+        c.request(method, path, body=json.dumps(body).encode() if body is not None else None,
+                  headers={'Content-Type': 'application/json', 'Authorization': 'Bearer client-value',
+                           'Host': '127.0.0.1:13002'})
+        r = c.getresponse()
+        status, data = r.status, r.read()
+        c.close()
+        return status, json.loads(data) if data else None
+    def calls(self, name):
+        return self.servers[name].calls
+
+    def test_monitor_routes_reach_monitor_service_with_its_key(self):
+        for method, path in [('GET', '/v2/monitor?limit=5'), ('POST', '/v2/monitor'),
+                             ('GET', '/v2/monitor/abc/checks'), ('DELETE', '/V2/Monitor/abc')]:
+            with self.subTest(path=path):
+                status, data = self.request(method, path, {} if method == 'POST' else None)
+                self.assertEqual(status, 200)
+                self.assertEqual(data['echo'], {'method': method, 'path': path})
+                call = self.calls('monitor')[-1]
+                self.assertEqual(call['auth'], 'Bearer fc-monitor-key')
+                self.assertEqual(call['host'], '127.0.0.1:13002')
+        self.assertEqual(self.calls('core'), [])
+        self.assertEqual(self.calls('browser'), [])
+
+    def test_browser_and_interact_aliases_reach_browser_service(self):
+        for path in ['/v2/browser', '/v2/browser/s1/execute', '/v2/interact', '/v2/interact/s1']:
+            with self.subTest(path=path):
+                self.assertEqual(self.request('POST', path, {})[0], 200)
+                self.assertEqual(self.calls('browser')[-1]['path'], path)
+                self.assertEqual(self.calls('browser')[-1]['auth'], 'Bearer fc-browser-key')
+        self.assertEqual(self.calls('core'), [])
+
+    def test_lookalike_paths_stay_on_core(self):
+        for path in ['/v2/monitoring', '/v2/browsers', '/v1/monitor', '/v2/scrape/abc']:
+            self.request('GET', path)
+        self.assertEqual([c['path'] for c in self.calls('core')],
+                         ['/v2/monitoring', '/v2/browsers', '/v1/monitor', '/v2/scrape/abc'])
+        self.assertEqual(self.calls('core')[0]['auth'], 'Bearer client-value')
+        self.assertEqual(self.calls('monitor') + self.calls('browser'), [])
+
+    def test_missing_service_key_fails_before_any_backend_call(self):
+        original = self.server.services['monitor']
+        self.server.services['monitor'] = (original[0], Path(self.keys.name) / 'absent.json')
+        try:
+            status, data = self.request('GET', '/v2/monitor')
+        finally:
+            self.server.services['monitor'] = original
+        self.assertEqual((status, data['error']), (503, 'local_service_unconfigured'))
+        self.assertEqual(self.calls('monitor'), [])
+
+    def test_interact_replays_core_scrape_once_on_browser_service(self):
+        self.servers['core'].factory = lambda m, p, b: (200, {'success': True, 'data': {
+            'markdown': 'page', 'json': {'a': 1}, 'metadata': {'scrapeId': 'Core-Scrape-1'}}})
+        def browser(method, path, body):
+            if path == '/v2/scrape':
+                return 200, {'success': True, 'data': {'metadata': {'scrapeId': 'browser-7'}}}
+            return echo(method, path, body)
+        self.servers['browser'].factory = browser
+        scrape = {'url': 'https://example.org/', 'formats': ['markdown', 'json'],
+                  'jsonOptions': {'prompt': 'x'}, 'waitFor': 500, 'proxy': 'stealth'}
+        status, data = self.request('POST', '/v2/scrape', scrape)
+        self.assertEqual((status, data['data']['json']), (200, {'a': 1}))
+        for _ in range(2):
+            status, data = self.request('POST', '/v2/scrape/Core-Scrape-1/interact', {'prompt': 'click'})
+            self.assertEqual(status, 200)
+            self.assertEqual(data['echo']['path'], '/v2/scrape/browser-7/interact')
+        status, data = self.request('DELETE', '/v2/scrape/Core-Scrape-1/interact')
+        self.assertEqual(data['echo'], {'method': 'DELETE', 'path': '/v2/scrape/browser-7/interact'})
+        replays = [c for c in self.calls('browser') if c['path'] == '/v2/scrape']
+        self.assertEqual([c['body'] for c in replays], [{'url': 'https://example.org/', 'formats': ['markdown'],
+                                                         'blockAds': False, 'maxAge': 0, 'waitFor': 500}])
+        self.assertEqual(replays[0]['auth'], 'Bearer fc-browser-key')
+        self.assertEqual(self.calls('browser')[1]['body'], {'prompt': 'click'})
+
+    def test_unknown_scrape_id_passes_through_to_browser_service(self):
+        status, data = self.request('POST', '/v2/scrape/native-id/interact', {'code': '1'})
+        self.assertEqual(data['echo']['path'], '/v2/scrape/native-id/interact')
+        self.assertEqual([c['path'] for c in self.calls('browser')], ['/v2/scrape/native-id/interact'])
+
+    def test_failed_replay_returns_browser_error_and_is_not_cached(self):
+        self.servers['core'].factory = lambda m, p, b: (200, {'success': True, 'data': {'metadata': {'scrapeId': 'core-2'}}})
+        self.servers['browser'].factory = lambda m, p, b: (400, {'success': False, 'error': 'unsupported option'})
+        self.request('POST', '/v2/scrape', {'url': 'https://example.org/'})
+        for _ in range(2):
+            status, data = self.request('POST', '/v2/scrape/core-2/interact', {'prompt': 'x'})
+            self.assertEqual((status, data['error']), (400, 'unsupported option'))
+        self.assertEqual([c['path'] for c in self.calls('browser')], ['/v2/scrape', '/v2/scrape'])
+
+    def test_recent_map_expires_and_stays_bounded(self):
+        recent = proxy.Recent(size=2, ttl=60)
+        for key in 'abc':
+            recent.put(key, key)
+        self.assertEqual((recent.get('a'), recent.get('c')), (None, 'c'))
+        with mock.patch.object(proxy.time, 'monotonic', return_value=proxy.time.monotonic() + 61):
+            self.assertIsNone(recent.get('c'))
+
+
 if __name__ == '__main__':
     unittest.main()

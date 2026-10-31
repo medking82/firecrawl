@@ -11,6 +11,9 @@ It does not switch the existing Firecrawl deployment to DB authentication.
   NuQ's pinned upstream schema runs in this project's `postgres` database.
 - API binds GA401 loopback **3006**. Windows uses a separate hidden SSH tunnel
   **13006 → ga401:3006**. Existing **13002 → 3002** stays unchanged.
+  The search-continuity proxy behind 13002 (GA401 `3003`) also sends
+  `/v2/monitor*` here with this tenant's key, so the single-URL Firecrawl MCP
+  reaches monitors; the 13002 core API itself is unchanged.
 - Real UUID API keys authenticate against local `teams` / `api_keys` and auth
   SQL functions. `teams.org_id` permits NULL locally, which keeps the native
   runner outside external credit locks. `bill_team_7` records local usage;
