@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Firecrawl core upgrade candidate and approved cutover
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+RandomizedDelaySec=30min
+Persistent=true
+Unit=firecrawl-upgrade-candidate.service
+
+[Install]
+WantedBy=timers.target

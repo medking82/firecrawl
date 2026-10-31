@@ -11,6 +11,11 @@ canonical_state_dir=/home/marck/.local/state/firecrawl-updater
 state_dir=${FIRECRAWL_UPDATE_STATE_DIR:-$canonical_state_dir}
 guard_sha256=07f73956c9531c483ccd9816af9b3aa06de87424dc0ab33758e9daa2c5e16c3d
 guard_file="$canonical_state_dir/guards/$guard_sha256.py"
+worktree_root=${FIRECRAWL_WORKTREE_ROOT:-/home/marck/github/worktrees/firecrawl}
+security_refresh=${FIRECRAWL_SECURITY_REFRESH:-/home/marck/.local/lib/firecrawl-security-refresh/deployment/self-hosted-auto/security_refresh.py}
+security_journals=${FIRECRAWL_SECURITY_STATE:-/home/marck/.local/state/firecrawl-security-refresh}
+notice_repo=${FIRECRAWL_NOTICE_REPO:-medking82/pc-maintenance}
+notice_owner=medking82
 previous_commit=""
 previous_tag=""
 rollback_active=0
@@ -18,6 +23,9 @@ deployment_started=0
 preimage=""
 candidate_dir=""
 candidate_evidence=""
+candidate_base_image=""
+candidate_checks_sha256=""
+phase=""
 retired_agents=0
 
 log() { printf '%s %s\n' "$(date --iso-8601=seconds)" "$*"; }
@@ -214,7 +222,7 @@ PYRESTART
 
 prepare_candidate() {
   # Git-owned candidate checkout; never build in or switch the live checkout.
-  candidate_dir="/home/marck/github/worktrees/firecrawl/update-$latest_commit"
+  candidate_dir="$worktree_root/update-$latest_commit"
   candidate_evidence=$(mktemp -d "$state_dir/candidate.XXXXXXXX")
   if [[ -e "$candidate_dir" ]]; then
     [[ ! -L "$candidate_dir" && "$(git -C "$candidate_dir" rev-parse HEAD)" == "$latest_commit" && -z "$(git -C "$candidate_dir" status --porcelain)" ]] || return 1
@@ -427,6 +435,7 @@ PYBASE
     return 1
   fi
   docker image rm "$base_tag" >/dev/null
+  candidate_base_image=$base_image
   patched_image=$(cat "$candidate_evidence/patched-iid")
   [[ "$patched_image" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
   # Verify the resulting filesystem ancestry and inherited runtime metadata;
@@ -611,19 +620,26 @@ fmt = '{"service":{{json (index .Config.Labels "com.docker.compose.service")}},"
 baseline = None
 def baseline_files(paths):
     base = [str(Path.cwd() / name) for name in ('docker-compose.yaml', 'docker-compose.override.yaml')]
-    if paths[:2] != base or len(paths) not in (2, 3):
+    if paths[:2] != base:
         raise SystemExit('Unsupported Compose baseline files')
-    if len(paths) == 3:
-        overlay = Path(paths[2])
-        state = Path('/home/marck/.local/state/firecrawl-updater')
-        if (overlay.parent.parent != state or not overlay.parent.name.startswith('candidate.')
-                or not (overlay.name == 'images.json' or re.fullmatch(r'images\.candidate-patch-promotion-[0-9a-f]{32}\.json', overlay.name))
-                or any(p.is_symlink() for p in (overlay, *overlay.parents))):
+    state = Path('/home/marck/.local/state/firecrawl-updater')
+    security = Path('/home/marck/.local/state/firecrawl-security-refresh')
+    for name in paths[2:]:
+        overlay = Path(name)
+        # Image-only overlays accumulate from earlier updater, promotion and
+        # security-refresh owners; rollback re-pins every service image below.
+        known = ((overlay.parent.parent == state and overlay.parent.name.startswith('candidate.')
+                  and (overlay.name == 'images.json' or re.fullmatch(r'images\.candidate-patch-promotion-[0-9a-f]{32}\.json', overlay.name)))
+                 or (overlay.parent.parent == state and re.fullmatch(r'brotli-promotion-[0-9a-f]{32}', overlay.parent.name)
+                     and overlay.name == 'core-candidate.json')
+                 or (overlay.parent.parent == security and re.fullmatch(r'run-[0-9a-f]{32}', overlay.parent.name)
+                     and re.fullmatch(r'firecrawl-(?:candidate|recovery)\.json', overlay.name)))
+        if not known or any(p.is_symlink() for p in (overlay, *overlay.parents)):
             raise SystemExit('Unsupported Compose image overlay')
         value = json.loads(overlay.read_bytes())
         if (set(value) != {'services'} or not isinstance(value['services'], dict) or not value['services']
-                or any(not isinstance(entry,dict) or set(entry) != {'image','pull_policy'}
-                       or entry['pull_policy'] != 'never' or not re.fullmatch(r'sha256:[a-f0-9]{64}',entry['image'])
+                or any(not isinstance(entry,dict) or 'image' not in entry or not set(entry) <= {'image','pull_policy'}
+                       or entry.get('pull_policy', 'never') != 'never' or not re.fullmatch(r'sha256:[a-f0-9]{64}',entry['image'])
                        for entry in value['services'].values())):
             raise SystemExit('Compose baseline overlay is not image-only')
     # The exact live images are captured below for every service, including the
@@ -687,10 +703,11 @@ PY
 }
 
 rollback() {
-  local original_rc=$? failed=0
+  local original_rc=$? failed=0 rolled=0
   trap - ERR
   set +e
   if [[ "$rollback_active" -eq 1 && -n "$previous_commit" ]]; then
+    rolled=1
     log "update failed; restoring previous source and exact image preimage"
     if ! git checkout --detach "$previous_commit"; then
       log "rollback failed: previous source could not be restored"
@@ -713,34 +730,384 @@ rollback() {
       log "rollback restored previous source and exact image preimage"
     fi
   fi
+  failure_notice "$failed" "$rolled"
   exit "$original_rc"
 }
 
-main() {
-  if [[ "$#" -eq 1 && "$1" == --check-only ]]; then
-    [[ ! -L "$canonical_state_dir/update.lock" && -f "$canonical_state_dir/update.lock" ]] || return 1
-    exec 9<"$canonical_state_dir/update.lock"
-    python3 -B - "$canonical_state_dir/update.lock" <<'PYCHECKLOCK'
-import os, stat, sys
-opened, current = os.fstat(9), os.lstat(sys.argv[1])
-if (not stat.S_ISREG(opened.st_mode) or opened.st_uid != os.getuid()
-        or stat.S_IMODE(opened.st_mode) != 0o600 or opened.st_nlink != 1
-        or (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino)):
-    raise SystemExit('unsafe Firecrawl coordination lock')
-PYCHECKLOCK
-    flock -s -n 9 || { log 'Firecrawl update lock is busy'; return 1; }
-    smoke_test
-    log "check-only healthy; no update or state changes"
-    return
-  fi
-  if [[ "$#" -ne 0 ]]; then
-    printf '%s\n' 'Usage: firecrawl-update [--check-only]' >&2
-    return 64
-  fi
-  if [[ "$repo" == '/home/marck/github/firecrawl' && "$state_dir" != "$canonical_state_dir" ]]; then
-    log "The production Firecrawl checkout requires its canonical coordination lock"
-    return 1
-  fi
+failure_notice() {
+  # Runs inside rollback with errexit off; a notice never changes the exit status.
+  local failed=$1 rolled=$2 detail
+  case "$phase" in
+    prepare)
+      gate block "$state_dir" "$repo" "$latest_tag" "$latest_commit" "$guard_sha256" "${candidate_evidence:--}" \
+        "${candidate_dir:--}" "${candidate_base_image:--}"
+      gate notify "$state_dir" failed "$latest_tag" "$latest_commit" "${candidate_evidence:--}" \
+        "${previous_tag:-$previous_commit}" "candidate build or admission failed" ||
+        log "upgrade notice not delivered; retrying next run"
+      ;;
+    precheck)
+      gate notify "$state_dir" cutover_failed "$latest_tag" "$latest_commit" "${candidate_evidence:--}" \
+        "${previous_tag:-$previous_commit}" "approved cutover stopped before any change; approval kept" ||
+        log "upgrade notice not delivered; retrying next run"
+      ;;
+    cutover)
+      gate retire "$state_dir" failed
+      if [[ "$rolled" -eq 1 && "$failed" -eq 0 ]]; then
+        detail="cutover failed; previous version restored and smoke passed"
+      else
+        detail="cutover failed; rollback incomplete, inspect GA401"
+      fi
+      gate notify "$state_dir" cutover_failed "$latest_tag" "$latest_commit" "${candidate_evidence:--}" \
+        "${previous_tag:-$previous_commit}" "$detail" || log "upgrade notice not delivered"
+      ;;
+  esac
+}
+
+# Candidate receipts, single-use approvals, retention and the Owner notice.
+# Caller holds run.lock for every mutating subcommand.
+gate() {
+  FIRECRAWL_NOTICE_REPO=$notice_repo FIRECRAWL_NOTICE_OWNER=$notice_owner python3 -B - "$@" <<'PYGATE'
+import datetime as dt, hashlib, json, os, re, secrets, subprocess, sys
+from pathlib import Path
+
+TAG = re.compile(r'v[0-9]+\.[0-9]+\.[0-9]+')
+COMMIT = re.compile(r'[0-9a-f]{40}')
+IMAGE = re.compile(r'sha256:[0-9a-f]{64}')
+DIGEST = re.compile(r'[0-9a-f]{64}')
+NONCE = re.compile(r'[0-9a-f]{32}')
+TITLE = '[Firecrawl Upgrade] GA401 core candidate'
+UPSTREAM = 'https://github.com/firecrawl/firecrawl'
+BINDING = ('tag', 'commit', 'evidence', 'checks_sha256', 'api_image')
+command, state, args = sys.argv[1], Path(sys.argv[2]), sys.argv[3:]
+receipt_path, approval_path = state / 'candidate-ready.json', state / 'approval.json'
+
+def now(): return dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds')
+def sha(data): return hashlib.sha256(data).hexdigest()
+
+def require(pattern, value, what):
+    if not isinstance(value, str) or not pattern.fullmatch(value): raise SystemExit('Invalid ' + what)
+    return value
+
+def private_dir(path):
+    if path.is_symlink(): raise SystemExit('Linked updater state rejected')
+    path.mkdir(mode=0o700, exist_ok=True)
+    info = path.stat()
+    if info.st_uid != os.getuid() or info.st_mode & 0o077: raise SystemExit('Unsafe updater state directory')
+    return path
+
+def read(path):
+    if path.is_symlink() or not path.is_file(): raise SystemExit('Updater record unavailable: ' + path.name)
+    return path.read_bytes()
+
+def load(path): return json.loads(read(path))
+
+def write(path, value, exclusive=False):
+    data = (json.dumps(value, sort_keys=True, indent=2) + '\n').encode()
+    target = path if exclusive else path.with_name('.' + path.name + '.' + secrets.token_hex(8))
+    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, 'wb') as stream:
+        stream.write(data); stream.flush(); os.fsync(stream.fileno())
+    if not exclusive: os.replace(target, path)
+
+def move(path, folder, prefix, nonce):
+    nonce = nonce if isinstance(nonce, str) and NONCE.fullmatch(nonce) else secrets.token_hex(16)
+    target = private_dir(folder) / (prefix + '-' + nonce + '-' + secrets.token_hex(4) + '.json')
+    os.rename(path, target)
+    return target
+
+def evidence_dir(path):
+    root = Path(path)
+    if (root.parent != state or not re.fullmatch(r'candidate\.[A-Za-z0-9]{8}', root.name)
+            or root.is_symlink() or not root.is_dir()):
+        raise SystemExit('Candidate evidence path rejected')
+    return root
+
+def admitted(evidence, checks_sha256, tag, commit):
+    root = evidence_dir(evidence)
+    data = read(root / 'checks.json')
+    if sha(data) != checks_sha256: raise SystemExit('Candidate evidence changed')
+    report = json.loads(data)
+    if report.get('status') != 'checks_passed' or report.get('tag') != tag or report.get('source_commit') != commit:
+        raise SystemExit('Candidate checks missing or stale')
+    if load(root / 'images.json') != {'services': report['images']}: raise SystemExit('Candidate image manifest changed')
+    return report
+
+def record(value, status, **extra):
+    folder = private_dir(state / 'candidates')
+    evidence = value.get('evidence')
+    name = Path(evidence).name if evidence not in (None, '-') else value['tag'] + '-' + value['commit'][:12]
+    path = folder / (name + '.json')
+    current = load(path) if path.exists() else {}
+    current.update(value); current.update(extra, status=status, updated_at=now())
+    write(path, current)
+
+def current_receipt():
+    if not receipt_path.exists(): return None
+    value = load(receipt_path)
+    admitted(value['evidence'], value['checks_sha256'], value['tag'], value['commit'])
+    return value
+
+def binding(value):
+    result = {key: value[key] for key in BINDING}
+    result['receipt_sha256'] = sha(read(receipt_path))
+    return result
+
+def blocked_key(repo, tag, commit, guard):
+    inputs = [tag, commit, guard]
+    for name in ('.env', 'docker-compose.override.yaml'):
+        path = Path(repo) / name
+        inputs.append(sha(path.read_bytes()) if path.is_file() else '-')
+    return sha('|'.join(inputs).encode())
+
+def retire(status):
+    if receipt_path.exists():
+        record(load(receipt_path), status)
+        receipt_path.unlink()
+    if approval_path.exists():
+        move(approval_path, state / 'approvals', status, load(approval_path).get('nonce'))
+
+def gh(method, path, payload=None):
+    cmd = [os.environ.get('FIRECRAWL_NOTICE_GH', 'gh'), 'api', '--method', method,
+           '-H', 'Accept: application/vnd.github+json', path]
+    if payload is not None: cmd += ['--input', '-']
+    result = subprocess.run(cmd, input=None if payload is None else json.dumps(payload),
+                            capture_output=True, text=True, timeout=60)
+    if result.returncode: raise SystemExit('Notice delivery failed: gh api ' + method + ' ' + path)
+    return json.loads(result.stdout) if result.stdout.strip() else None
+
+def admission_rows(evidence):
+    root = None
+    try: root = evidence_dir(evidence)
+    except SystemExit: pass
+    report = json.loads(read(root / 'checks.json')) if root and (root / 'checks.json').is_file() else {}
+    profile = (report.get('review_basis') or {}).get('profile') or (report.get('transport_check') or {}).get('transport_profile')
+    packages = ((report.get('package_check') or {}).get('packages')) or {}
+    versions = ', '.join(name + ' ' + '/'.join(sorted({copy.get('version', '?') for copy in copies}))
+                         for name, copies in sorted(packages.items()))
+    checks = sha((root / 'checks.json').read_bytes()) if report else '-'
+    api = ((report.get('images') or {}).get('api') or {}).get('image', '-')
+    return report.get('status', 'build_failed'), profile or '-', versions or '-', api, checks
+
+def body(event, tag, commit, evidence, previous, detail, owner):
+    status, profile, versions, api, checks = admission_rows(evidence)
+    compare = (UPSTREAM + '/compare/' + previous + '...' + tag) if TAG.fullmatch(previous or '') else UPSTREAM + '/tree/' + tag
+    if event == 'ready':
+        lead = ('GA401 Firecrawl core 有新的升級候選 **' + tag + '**，已自動建置並通過 admission，**尚未切換**。'
+                '要切換請在 GA401 核准這個 tag（核准只對這個 tag 與這份 evidence 有效、單次使用）：\n\n'
+                '```\nfirecrawl-upgrade --approve ' + tag + '\n```\n\n'
+                '核准後，下一次每日 `firecrawl-upgrade-candidate.timer` 會切換；要立刻切換，核准後在 GA401 執行 `firecrawl-upgrade`。'
+                '出現更新的 tag 或 runtime 設定改變時，舊核准自動作廢。')
+    else:
+        lead = ('GA401 Firecrawl core 候選 **' + tag + '** 沒有通過自動建置或 admission（`' + status + '`），**不會切換**。'
+                '`awaiting_transport_review` 代表 transport 檔案和已審查的 profile 不同，需要先人工 review guard；'
+                '其他狀態請看 GA401 的 `journalctl --user -u firecrawl-upgrade-candidate`。同一個 tag、guard 與設定不會每天重建。')
+    rows = [('Tag', '`' + tag + '`'), ('Commit', '`' + commit + '`'), ('Upstream compare', compare),
+            ('目前執行', '`' + (previous or '-') + '`'), ('Admission', '`' + status + '`（transport profile `' + profile + '`）'),
+            ('Package audit', versions), ('切換前 live smoke（現行版本）' if event == 'ready' else '說明', detail or '-'),
+            ('API image', '`' + api + '`'),
+            ('Checks SHA-256', '`' + checks + '`'), ('Evidence', '`' + evidence + '`')]
+    table = '| 項目 | 值 |\n|---|---|\n' + ''.join('| ' + k + ' | ' + v + ' |\n' for k, v in rows)
+    return ('@' + owner + ' ' + lead + '\n\n' + table + '\n切換成功後這個 issue 會自動關閉；切換失敗或 rollback 會在這裡留言。'
+            '\n\n由 GA401 `firecrawl-upgrade` 發出。')
+
+def find_issue(repo, notice):
+    number = notice.get('issue')
+    if isinstance(number, int):
+        issue = gh('GET', 'repos/' + repo + '/issues/' + str(number))
+        if issue.get('state') == 'open' and issue.get('title') == TITLE: return number
+    for issue in gh('GET', 'repos/' + repo + '/issues?state=open&per_page=100'):
+        if 'pull_request' not in issue and issue.get('title') == TITLE: return issue['number']
+    return None
+
+def notify(event, tag, commit, evidence, previous, detail):
+    repo = require(re.compile(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+'), os.environ.get('FIRECRAWL_NOTICE_REPO'), 'notice repository')
+    owner = require(re.compile(r'[A-Za-z0-9-]+'), os.environ.get('FIRECRAWL_NOTICE_OWNER'), 'notice owner')
+    if event not in ('ready', 'failed', 'approved', 'deployed', 'cutover_failed', 'current'): raise SystemExit('Unknown notice')
+    require(TAG, tag, 'tag'); require(COMMIT, commit, 'commit')
+    path = state / 'notice.json'
+    notice = load(path) if path.exists() else {}
+    key = '|'.join((event, tag, commit, evidence, detail))
+    if notice.get('last_key') == key: return
+    issue = find_issue(repo, notice)
+    base = 'repos/' + repo + '/issues'
+    comment = None
+    if event in ('ready', 'failed'):
+        text = body(event, tag, commit, evidence, previous, detail, owner)
+        if issue is None:
+            issue = gh('POST', base, {'title': TITLE, 'body': text, 'assignees': [owner]})['number']
+        else:
+            gh('PATCH', base + '/' + str(issue), {'body': text, 'assignees': [owner]})
+            comment = ('候選更新為 **' + tag + '**（`' + commit[:12] + '`）：' +
+                       ('已通過 admission，等待核准。' if event == 'ready' else '沒有通過，不會切換。') + '詳見上方說明。')
+    elif event == 'approved':
+        comment = '已核准 **' + tag + '**（`' + commit[:12] + '`）。下一次 `firecrawl-upgrade` 執行時切換。'
+    elif event == 'cutover_failed':
+        comment = '@' + owner + ' 切換 **' + tag + '** 沒有完成：' + detail + '。核准已用掉或保留的狀態見 `firecrawl-upgrade --status`。'
+        if issue is None:
+            issue = gh('POST', base, {'title': TITLE, 'body': comment, 'assignees': [owner]})['number']
+            comment = None
+    elif event == 'deployed':
+        comment = ('GA401 core 已切換到 **' + tag + '**（`' + commit[:12] + '`），smoke 通過；' + detail +
+                   '。自動關閉。')
+    elif event == 'current' and issue is not None:
+        comment = 'GA401 core 已是 **' + tag + '**，沒有待核准的候選。自動關閉。'
+    if issue is not None and comment:
+        gh('POST', base + '/' + str(issue) + '/comments', {'body': comment})
+    if issue is not None and event in ('deployed', 'current'):
+        gh('PATCH', base + '/' + str(issue), {'state': 'closed', 'state_reason': 'completed'})
+    notice.update(last_key=key, issue=issue, event=event, tag=tag, at=now())
+    write(path, notice)
+
+def retain(repo, root, live_commit, journals):
+    private_dir(state / 'candidates')
+    run = lambda *cmd: subprocess.run(list(cmd), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=120)
+    used = set()
+    for identity in run('docker', 'ps', '-aq', '--no-trunc').stdout.split():
+        used.add(run('docker', 'inspect', '--format', '{{.Image}}', identity).stdout.strip())
+    # Images named by any security journal, recovery preimage or live record stay.
+    texts = [p.read_text() for p in Path(journals).glob('run-*/transaction.json') if p.is_file() and not p.is_symlink()]
+    texts += [p.read_text() for p in state.glob('preimage.*/compose-images.json') if p.is_file() and not p.is_symlink()]
+    texts += [p.read_text() for p in (receipt_path, approval_path) if p.is_file()]
+    referenced = '\n'.join(texts)
+    live = {Path(root) / ('update-' + live_commit)}
+    if receipt_path.is_file(): live.add(Path(load(receipt_path)['candidate_dir']))
+    for path in sorted((state / 'candidates').glob('*.json')):
+        value = load(path)
+        if value.get('cleaned') or value.get('status') not in ('superseded', 'stale', 'failed', 'blocked', 'deployed'): continue
+        kept, removed = [], []
+        if value['status'] != 'deployed':
+            for image in (value.get('api_image'), value.get('base_image')):
+                if not isinstance(image, str) or not IMAGE.fullmatch(image): continue
+                if run('docker', 'image', 'inspect', image).returncode: continue
+                if image in used or image in referenced or run('docker', 'image', 'rm', image).returncode: kept.append(image)
+                else: removed.append(image)
+        worktree = Path(value.get('candidate_dir') or '-')
+        if worktree.parent == Path(root) and re.fullmatch(r'update-[0-9a-f]{40}', worktree.name):
+            if worktree in live: kept.append(str(worktree))
+            elif worktree.exists():
+                if run('git', '-C', repo, 'worktree', 'remove', str(worktree)).returncode: kept.append(str(worktree))
+                else: removed.append(str(worktree))
+        value.update(cleaned=not kept, retention={'kept': kept, 'removed': removed, 'at': now()})
+        write(path, value)
+        if removed: print(json.dumps({'retained': path.name, 'removed': removed}))
+
+private_dir(state)
+if command == 'status':
+    names = ('candidate-ready.json', 'approval.json', 'candidate-blocked.json', 'notice.json')
+    print(json.dumps({name: load(state / name) if (state / name).is_file() else None for name in names},
+                     indent=2, sort_keys=True))
+elif command == 'receipt':
+    tag, commit, evidence, checks_sha256, candidate_dir, base_image, smoke = args
+    require(TAG, tag, 'tag'); require(COMMIT, commit, 'commit'); require(DIGEST, checks_sha256, 'checks hash')
+    if base_image != '-': require(IMAGE, base_image, 'base image')
+    report = admitted(evidence, checks_sha256, tag, commit)
+    if receipt_path.exists(): raise SystemExit('Another candidate receipt is present')
+    value = {'schema': 1, 'tag': tag, 'commit': commit, 'evidence': evidence, 'checks_sha256': checks_sha256,
+             'candidate_dir': candidate_dir, 'api_image': report['images']['api']['image'],
+             'base_image': None if base_image == '-' else base_image,
+             'images': {name: entry['image'] for name, entry in report['images'].items()},
+             'transport_profile': report['review_basis']['profile'], 'guard_sha256': report['guard_sha256'],
+             'runtime_config_sha256': report['runtime_config_sha256'], 'live_smoke': smoke, 'prepared_at': now()}
+    write(receipt_path, value, exclusive=True)
+    record(value, 'ready')
+elif command == 'ready':
+    value = current_receipt()
+    sys.exit(0 if value and (value['tag'], value['commit']) == tuple(args) else 3)
+elif command == 'field':
+    value = current_receipt()
+    if value is None: raise SystemExit('No admitted candidate')
+    for key in args:
+        item = str(value[key])
+        if '\n' in item: raise SystemExit('Invalid candidate field')
+        print(item)
+elif command == 'approve':
+    tag, user = args
+    if not TAG.fullmatch(tag): raise SystemExit('Approve an exact tag such as v2.11.642')
+    value = current_receipt()
+    if value is None: raise SystemExit('No admitted candidate is waiting for approval')
+    if value['tag'] != tag: raise SystemExit('The admitted candidate is ' + value['tag'] + ', not ' + tag + '; nothing approved')
+    bound = binding(value)
+    if approval_path.exists():
+        existing = load(approval_path)
+        if all(existing.get(key) == item for key, item in bound.items()):
+            print(json.dumps({'approved': tag, 'commit': value['commit'], 'already': True})); sys.exit(0)
+        move(approval_path, state / 'approvals', 'superseded', existing.get('nonce'))
+    approval = dict(bound, schema=1, nonce=secrets.token_hex(16), approved_at=now(), approved_by=user)
+    write(approval_path, approval, exclusive=True)
+    record(value, 'approved', approval_nonce=approval['nonce'])
+    print(json.dumps({'approved': tag, 'commit': value['commit']}))
+elif command == 'approved':
+    tag, commit = args
+    if not approval_path.exists(): sys.exit(3)
+    approval = load(approval_path)
+    try: value = current_receipt()
+    except SystemExit: value = None
+    if (value is None or (value['tag'], value['commit']) != (tag, commit)
+            or any(approval.get(key) != item for key, item in binding(value).items())):
+        move(approval_path, state / 'approvals', 'invalid', approval.get('nonce'))
+        print('approval does not match the admitted candidate; withdrawn', file=sys.stderr); sys.exit(2)
+    for key in ('evidence', 'candidate_dir', 'checks_sha256'): print(value[key])
+elif command == 'consume':
+    approval = load(approval_path)
+    value = current_receipt()
+    move(approval_path, state / 'approvals', 'consumed', approval.get('nonce'))
+    record(value, 'cutover', approval_nonce=approval.get('nonce'))
+elif command == 'retire':
+    if args[0] not in ('superseded', 'stale', 'failed', 'deployed'): raise SystemExit('Unknown retirement')
+    retire(args[0])
+elif command == 'supersede':
+    tag, commit = args
+    if receipt_path.exists() and (load(receipt_path)['tag'], load(receipt_path)['commit']) != (tag, commit):
+        record(load(receipt_path), 'superseded'); receipt_path.unlink()
+    if approval_path.exists():
+        approval = load(approval_path)
+        if (approval.get('tag'), approval.get('commit')) != (tag, commit) or not receipt_path.exists():
+            move(approval_path, state / 'approvals', 'superseded', approval.get('nonce'))
+elif command == 'config':
+    # Exit 1 only for drift; any other failure is distinct so it cannot look like drift.
+    try:
+        value = current_receipt()
+        if value is None: sys.exit(3)
+        repo = args[0]; source = Path(value['candidate_dir'])
+        if source.name != 'update-' + value['commit'] or not source.is_dir(): raise ValueError()
+        compose = ['docker', 'compose', '--project-name', 'firecrawl', '--env-file', repo + '/.env',
+                   '-f', str(source / 'docker-compose.yaml'), '-f', repo + '/docker-compose.override.yaml']
+        config = json.loads(subprocess.check_output(compose + ['config', '--format', 'json'], timeout=60))
+        for service in config['services'].values(): service.pop('build', None)
+        current = sha(json.dumps(config, sort_keys=True, separators=(',', ':')).encode())
+    except (Exception, SystemExit) as error:
+        if isinstance(error, SystemExit) and error.code == 3: raise
+        print('candidate configuration check unavailable', file=sys.stderr); sys.exit(4)
+    sys.exit(0 if current == value['runtime_config_sha256'] else 1)
+elif command == 'block':
+    repo, tag, commit, guard, evidence, candidate_dir, base_image = args
+    root = None
+    try: root = evidence_dir(evidence)
+    except SystemExit: pass
+    report = json.loads(read(root / 'checks.json')) if root and (root / 'checks.json').is_file() else None
+    patched = (root / 'patched-iid').read_text().strip() if root and (root / 'patched-iid').is_file() else None
+    value = {'tag': tag, 'commit': commit, 'evidence': evidence, 'candidate_dir': candidate_dir,
+             'api_image': patched if patched and IMAGE.fullmatch(patched) else None,
+             'base_image': base_image if IMAGE.fullmatch(base_image) else None}
+    record(value, 'blocked' if report else 'failed', admission=(report or {}).get('status', 'build_failed'))
+    # Only a completed admission verdict waits for review; build failures retry next run.
+    if report and report.get('status') in ('awaiting_transport_review', 'blocked'):
+        write(state / 'candidate-blocked.json', {'key': blocked_key(repo, tag, commit, guard), 'tag': tag, 'commit': commit,
+              'admission': report['status'], 'evidence': evidence, 'recorded_at': now()})
+elif command == 'blocked':
+    repo, tag, commit, guard = args
+    path = state / 'candidate-blocked.json'
+    sys.exit(0 if path.is_file() and load(path).get('key') == blocked_key(repo, tag, commit, guard) else 3)
+elif command == 'retain':
+    retain(*args)
+elif command == 'notify':
+    notify(*args)
+else:
+    raise SystemExit('Unknown gate command')
+PYGATE
+}
+
+open_locks() {
   [[ ! -L "$state_dir" ]] || { log "linked updater state directory rejected"; return 1; }
   mkdir -p "$state_dir"
   chmod 700 "$state_dir"
@@ -761,6 +1128,107 @@ for fd, path in zip((8, 9), sys.argv[1:]):
         raise SystemExit("unsafe updater coordination lock")
     os.fchmod(fd, 0o600)
 PY
+}
+
+approve_candidate() {
+  local tag=$1 output fields
+  if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    printf '%s\n' 'Usage: firecrawl-upgrade --approve vX.Y.Z' >&2
+    return 64
+  fi
+  open_locks
+  flock -n 8 || { log "an upgrade run is active; approve again after it finishes"; return 1; }
+  gate approve "$state_dir" "$tag" "$(id -un)"
+  output=$(gate field "$state_dir" tag commit evidence)
+  mapfile -t fields <<<"$output"
+  gate notify "$state_dir" approved "${fields[0]}" "${fields[1]}" "${fields[2]}" - "" ||
+    log "approval notice not delivered"
+  log "approved $tag; the next firecrawl-upgrade run cuts over (run firecrawl-upgrade to start now)"
+}
+
+cutover_candidate() {
+  phase=precheck
+  # Do not interrupt an existing guarded read. Conversion may drop SH on failure;
+  # run.lock remains held and we exit without changing live source or containers.
+  if ! flock -x -n 9; then
+    log "approved cutover deferred: active page reads; approval kept for the next run"
+    phase=""
+    return
+  fi
+  # Freeze exact running/stopped service images before any source switch.
+  validate_config
+  snapshot_images
+  # Single use: from here a failure needs a new candidate and a new approval.
+  gate consume "$state_dir"
+  phase=cutover
+  log "updating ${previous_tag:-$previous_commit} to $latest_tag (Owner approved)"
+  rollback_active=1
+  git checkout --detach "$latest_tag"
+  preserve_retired_notice
+  validate_config
+  verify_candidate_manifest
+  deployment_started=1
+  docker compose -f "$repo/docker-compose.yaml" -f "$repo/docker-compose.override.yaml" -f "$candidate_evidence/images.json" up -d --no-build --pull never
+  smoke_test
+  set_restart_policy
+  deployment_started=0
+  rollback_active=0
+  phase=""
+  printf 'tag=%s\ncommit=%s\nupdated_at=%s\n' "$latest_tag" "$latest_commit" "$(date --iso-8601=seconds)" >"$state_dir/deployed.env"
+  gate retire "$state_dir" deployed
+  log "update completed at $latest_tag"
+  # The candidate carries its build-time Debian packages. The security owner takes
+  # run.lock and update.lock exclusively, so release both before refreshing it.
+  exec 8>&- 9>&-
+  local security="security refresh failed; core cutover stands" attempt
+  # The per-minute recovery timer can hold the owner lock briefly.
+  for attempt in 1 2 3; do
+    if timeout 100m python3 -B "$security_refresh"; then
+      security="security refresh passed"
+      break
+    fi
+    [[ "$attempt" -eq 3 ]] || sleep 30
+  done
+  [[ "$security" == "security refresh passed" ]] ||
+    log "post-cutover security refresh failed; inspect $security_journals/latest.json"
+  gate notify "$state_dir" deployed "$latest_tag" "$latest_commit" "$candidate_evidence" \
+    "${previous_tag:-$previous_commit}" "$security" || log "upgrade notice not delivered"
+}
+
+main() {
+  if [[ "$#" -eq 1 && "$1" == --check-only ]]; then
+    [[ ! -L "$canonical_state_dir/update.lock" && -f "$canonical_state_dir/update.lock" ]] || return 1
+    exec 9<"$canonical_state_dir/update.lock"
+    python3 -B - "$canonical_state_dir/update.lock" <<'PYCHECKLOCK'
+import os, stat, sys
+opened, current = os.fstat(9), os.lstat(sys.argv[1])
+if (not stat.S_ISREG(opened.st_mode) or opened.st_uid != os.getuid()
+        or stat.S_IMODE(opened.st_mode) != 0o600 or opened.st_nlink != 1
+        or (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino)):
+    raise SystemExit('unsafe Firecrawl coordination lock')
+PYCHECKLOCK
+    flock -s -n 9 || { log 'Firecrawl update lock is busy'; return 1; }
+    smoke_test
+    log "check-only healthy; no update or state changes"
+    return
+  fi
+  if [[ "$#" -eq 2 && "$1" == --approve ]]; then
+    approve_candidate "$2"
+    return
+  fi
+  if [[ "$#" -eq 1 && "$1" == --status ]]; then
+    gate status "$state_dir"
+    return
+  fi
+  if [[ "$#" -ne 0 ]]; then
+    printf '%s\n' 'Usage: firecrawl-upgrade [--check-only | --status | --approve vX.Y.Z]' >&2
+    return 64
+  fi
+  if [[ "$repo" == '/home/marck/github/firecrawl' && "$state_dir" != "$canonical_state_dir" ]]; then
+    log "The production Firecrawl checkout requires its canonical coordination lock"
+    return 1
+  fi
+  open_locks
   if ! flock -n 8 || ! flock -s -n 9; then
     log "update or installer already running"
     return
@@ -783,38 +1251,56 @@ PY
   git merge-base --is-ancestor "$latest_commit" origin/main
   previous_commit=$(git rev-parse HEAD)
   previous_tag=$(git describe --tags --exact-match 2>/dev/null || true)
+  # A newer tag invalidates the older candidate and any approval bound to it.
+  gate supersede "$state_dir" "$latest_tag" "$latest_commit"
+  gate retain "$state_dir" "$repo" "$worktree_root" "$previous_commit" "$security_journals"
   if [[ "$latest_commit" == "$previous_commit" ]]; then
     validate_config
     smoke_test
     set_restart_policy
     printf 'tag=%s\ncommit=%s\nchecked_at=%s\n' "$latest_tag" "$latest_commit" "$(date --iso-8601=seconds)" >"$state_dir/deployed.env"
+    gate retire "$state_dir" superseded
+    gate notify "$state_dir" current "$latest_tag" "$latest_commit" - "$latest_tag" "" ||
+      log "upgrade notice not delivered; retrying next run"
     log "already current at $latest_tag"
     return
   fi
-  prepare_candidate
-  # Do not interrupt an existing guarded read. Conversion may drop SH on failure;
-  # run.lock remains held and we exit without changing live source or containers.
-  if ! flock -x -n 9; then
-    log "candidate ready; active page reads deferred cutover; active services preserved"
-    return 1
+  local approval=0 config=0 output fields
+  output=$(gate approved "$state_dir" "$latest_tag" "$latest_commit") || approval=$?
+  if [[ "$approval" -eq 0 ]] || gate ready "$state_dir" "$latest_tag" "$latest_commit"; then
+    gate config "$state_dir" "$repo" || config=$?
+    if [[ "$config" -eq 0 && "$approval" -eq 0 ]]; then
+      mapfile -t fields <<<"$output"
+      candidate_evidence=${fields[0]} candidate_dir=${fields[1]} candidate_checks_sha256=${fields[2]}
+      cutover_candidate
+      return
+    elif [[ "$config" -eq 0 ]]; then
+      gate notify "$state_dir" ready "$latest_tag" "$latest_commit" "$(gate field "$state_dir" evidence)" \
+        "${previous_tag:-$previous_commit}" "$(gate field "$state_dir" live_smoke)" ||
+        log "upgrade notice not delivered; retrying next run"
+      log "candidate $latest_tag ready; awaiting Owner approval (firecrawl-upgrade --approve $latest_tag)"
+      return
+    elif [[ "$config" -ne 1 ]]; then
+      log "candidate configuration check failed"
+      return 1
+    fi
+    log "runtime configuration changed since admission; withdrawing approval and rebuilding the candidate"
+    gate retire "$state_dir" stale
   fi
-  # Freeze exact running/stopped service images before any source switch.
-  validate_config
-  snapshot_images
-  log "updating ${previous_tag:-$previous_commit} to $latest_tag"
-  rollback_active=1
-  git checkout --detach "$latest_tag"
-  preserve_retired_notice
-  validate_config
-  verify_candidate_manifest
-  deployment_started=1
-  docker compose -f "$repo/docker-compose.yaml" -f "$repo/docker-compose.override.yaml" -f "$candidate_evidence/images.json" up -d --no-build --pull never
-  smoke_test
-  set_restart_policy
-  deployment_started=0
-  rollback_active=0
-  printf 'tag=%s\ncommit=%s\nupdated_at=%s\n' "$latest_tag" "$latest_commit" "$(date --iso-8601=seconds)" >"$state_dir/deployed.env"
-  log "update completed at $latest_tag"
+  if gate blocked "$state_dir" "$repo" "$latest_tag" "$latest_commit" "$guard_sha256"; then
+    log "candidate $latest_tag already failed admission with this guard and configuration; awaiting review"
+    return
+  fi
+  phase=prepare
+  prepare_candidate
+  phase=""
+  local smoke=passed
+  smoke_test || smoke=failed
+  gate receipt "$state_dir" "$latest_tag" "$latest_commit" "$candidate_evidence" "$candidate_checks_sha256" \
+    "$candidate_dir" "${candidate_base_image:--}" "$smoke"
+  gate notify "$state_dir" ready "$latest_tag" "$latest_commit" "$candidate_evidence" \
+    "${previous_tag:-$previous_commit}" "$smoke" || log "upgrade notice not delivered; retrying next run"
+  log "candidate $latest_tag admitted; awaiting Owner approval (firecrawl-upgrade --approve $latest_tag)"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

@@ -1,0 +1,11 @@
+[Unit]
+Description=Build and admit Firecrawl core upgrade candidates; cut over only an Owner-approved tag
+After=docker.service
+
+[Service]
+Type=oneshot
+UMask=0077
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/bin/firecrawl-upgrade
+TimeoutStartSec=4h
+NoNewPrivileges=yes

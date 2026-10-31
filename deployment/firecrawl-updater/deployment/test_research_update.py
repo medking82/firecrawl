@@ -61,6 +61,37 @@ class ResearchUpdaterTests(unittest.TestCase):
                     overlay.write_text(json.dumps({'services':{'api':{'image':'sha256:'+'a'*64,'environment':{'UNSAFE':'1'}}}}))
                     with self.assertRaises(SystemExit): namespace['baseline_files'](base+[str(overlay)])
 
+    def test_security_refresh_and_promotion_overlays_are_accepted_only_when_image_only(self):
+        body = SOURCE.read_text().split("<<'PYSNAPSHOT'\n",1)[1].split('\nPYSNAPSHOT',1)[0]
+        tree = ast.parse(body)
+        function = next(node for node in tree.body if isinstance(node,ast.FunctionDef) and node.name=='baseline_files')
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp); state=root/'state'; security=root/'security'
+            source=(ast.get_source_segment(body,function)
+                    .replace('/home/marck/.local/state/firecrawl-updater',str(state))
+                    .replace('/home/marck/.local/state/firecrawl-security-refresh',str(security)))
+            namespace={'Path':Path,'json':json,'re':re}
+            exec(source,namespace)
+            base=[str(root/name) for name in ('docker-compose.yaml','docker-compose.override.yaml')]
+            overlays=[]
+            for folder,name,value in ((state/('brotli-promotion-'+'1'*32),'core-candidate.json',
+                                       {'services':{'api':{'image':'sha256:'+'a'*64,'pull_policy':'never'},
+                                                    'redis':{'image':'sha256:'+'b'*64,'pull_policy':'never'}}}),
+                                      (security/('run-'+'2'*32),'firecrawl-recovery.json',{'services':{'api':{'image':'sha256:'+'c'*64}}}),
+                                      (security/('run-'+'3'*32),'firecrawl-candidate.json',{'services':{'api':{'image':'sha256:'+'d'*64}}})):
+                folder.mkdir(parents=True); (folder/name).write_text(json.dumps(value)); overlays.append(folder/name)
+            with patch.object(Path,'cwd',return_value=root):
+                self.assertEqual(namespace['baseline_files'](base+[str(p) for p in overlays]),base)
+                self.assertEqual(namespace['baseline_files'](base),base)
+                overlays[1].write_text(json.dumps({'services':{'api':{'image':'sha256:'+'c'*64,'environment':{'X':'1'}}}}))
+                with self.assertRaises(SystemExit): namespace['baseline_files'](base+[str(overlays[1])])
+                overlays[1].write_text(json.dumps({'services':{'api':{'image':'sha256:'+'c'*64,'pull_policy':'always'}}}))
+                with self.assertRaises(SystemExit): namespace['baseline_files'](base+[str(overlays[1])])
+                stray=security/('run-'+'4'*32)/'firecrawl-monitor-candidate.json'; stray.parent.mkdir()
+                stray.write_text(json.dumps({'services':{'api':{'image':'sha256:'+'e'*64}}}))
+                with self.assertRaises(SystemExit): namespace['baseline_files'](base+[str(stray)])
+                with self.assertRaises(SystemExit): namespace['baseline_files']([base[1],base[0]])
+
     def test_standalone_updater_has_no_gateway_or_app_dependency(self):
         source = SOURCE.read_text().lower()
         self.assertNotIn('strata', source)

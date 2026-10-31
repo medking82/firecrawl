@@ -10,7 +10,10 @@ import stat
 import subprocess
 
 ROOT = Path('/home/marck/.local/state/firecrawl-updater')
-TARGET = Path('/home/marck/.local/bin/firecrawl-update')
+# firecrawl-update is the security refresh launcher; the upgrade owner is separate.
+TARGET = Path('/home/marck/.local/bin/firecrawl-upgrade')
+UNITS = Path('/home/marck/.config/systemd/user')
+UNIT_NAMES = ('firecrawl-upgrade-candidate.service', 'firecrawl-upgrade-candidate.timer')
 REPO = Path('/home/marck/github/firecrawl')
 SERVICES = ('api', 'nuq-postgres', 'playwright-service', 'redis', 'rabbitmq', 'foundationdb')
 RESTART = ('services:\n' + ''.join(f'  {name}:\n    restart: unless-stopped\n' for name in SERVICES)).encode()
@@ -40,14 +43,44 @@ def install_restart_override():
 
 
 
-def install(source, expected_before, guard_source):
-    if not re.fullmatch('[0-9a-f]{64}', expected_before):
-        raise ValueError('Exact updater preimage hash required.')
+def install_units(units):
+    """Install the reviewed timer units; enabling them stays a separate Owner step."""
+    result = {}
+    if any(p.is_symlink() for p in (UNITS, *UNITS.parents)):
+        raise ValueError('Linked unit directory rejected.')
+    UNITS.mkdir(parents=True, exist_ok=True)
+    backups = ROOT / 'units'
+    for unit in units:
+        if unit.name not in UNIT_NAMES or unit.is_symlink() or not unit.is_file():
+            raise ValueError('Unexpected unit source.')
+        data = unit.read_bytes()
+        if not data.startswith(b'[Unit]\n'):
+            raise ValueError('Unexpected unit source.')
+        target = UNITS / unit.name
+        if target.is_symlink() or (target.exists() and not target.is_file()):
+            raise ValueError('Linked or unusual unit target rejected.')
+        if target.exists() and target.read_bytes() != data:
+            backups.mkdir(mode=0o700, exist_ok=True)
+            old = target.read_bytes()
+            with (backups / (unit.name + '.' + hashlib.sha256(old).hexdigest() + '.before')).open('wb') as stream: stream.write(old)
+        temporary = target.with_name('.' + unit.name + '.installing')
+        with temporary.open('xb') as stream: stream.write(data)
+        temporary.chmod(0o600)
+        temporary.replace(target)
+        result[unit.name] = hashlib.sha256(data).hexdigest()
+    return result
+
+
+def install(source, expected_before, guard_source, units=()):
+    # The first installation of the separate upgrade owner has no preimage.
+    if expected_before != 'absent' and not re.fullmatch('[0-9a-f]{64}', expected_before):
+        raise ValueError('Exact updater preimage hash (or absent) required.')
     if any(path.is_symlink() for path in (ROOT, TARGET, source, guard_source, *ROOT.parents, *TARGET.parents,
                                           *source.parents, *guard_source.parents)):
         raise ValueError('Linked updater boundary rejected.')
-    if not ROOT.is_dir() or not TARGET.is_file() or source.is_symlink() or not source.is_file() or guard_source.is_symlink() or not guard_source.is_file():
-        raise ValueError('Existing updater and reviewed source required.')
+    present = TARGET.is_file() if expected_before != 'absent' else not TARGET.exists()
+    if not ROOT.is_dir() or not present or source.is_symlink() or not source.is_file() or guard_source.is_symlink() or not guard_source.is_file():
+        raise ValueError('Expected updater state and reviewed source required.')
     after = source.read_bytes()
     if not after.startswith(b'#!/usr/bin/env bash\n'):
         raise ValueError('Unexpected updater source.')
@@ -62,8 +95,8 @@ def install(source, expected_before, guard_source):
         if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1:
             raise ValueError('Unsafe updater coordination lock.')
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        before = TARGET.read_bytes()
-        if hashlib.sha256(before).hexdigest() != expected_before:
+        before = TARGET.read_bytes() if expected_before != 'absent' else None
+        if before is not None and hashlib.sha256(before).hexdigest() != expected_before:
             raise ValueError('Installed updater changed; inspect before replacing.')
         install_restart_override()
         guards = ROOT / 'guards'
@@ -87,19 +120,22 @@ def install(source, expected_before, guard_source):
         receipt = ROOT / ('research-repair-' + hashlib.sha256(after).hexdigest()[:16] + '.json')
         if receipt.exists():
             raise ValueError('Updater installation already attempted; inspect its receipt.')
-        backup = receipt.with_suffix('.before.sh')
-        with backup.open('xb') as stream: stream.write(before)
-        backup.chmod(0o600)
+        if before is not None:
+            backup = receipt.with_suffix('.before.sh')
+            with backup.open('xb') as stream: stream.write(before)
+            backup.chmod(0o600)
         result = {'status': 'started', 'before_sha256': expected_before, 'after_sha256': hashlib.sha256(after).hexdigest(),
                   'guard_sha256': guard_digest}
         with receipt.open('x') as stream: json.dump(result, stream)
         receipt.chmod(0o600)
-        candidate = TARGET.with_name('firecrawl-update.research-candidate')
+        candidate = TARGET.with_name(TARGET.name + '.research-candidate')
         with candidate.open('xb') as stream: stream.write(after)
         candidate.chmod(0o700)
-        if TARGET.read_bytes() != before: raise ValueError('Updater changed during preparation.')
+        if (TARGET.read_bytes() if TARGET.exists() else None) != before:
+            raise ValueError('Updater changed during preparation.')
         candidate.replace(TARGET)
         if TARGET.read_bytes() != after: raise ValueError('Updater replacement verification failed.')
+        result['units'] = install_units(units)
         result['status'] = 'installed'
         receipt.write_text(json.dumps(result), encoding='utf-8')
         return result
@@ -112,5 +148,6 @@ if __name__ == '__main__':
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--expected-before', required=True)
     parser.add_argument('--guard-source', type=Path, required=True)
+    parser.add_argument('--unit', type=Path, action='append', default=[])
     args = parser.parse_args()
-    print(json.dumps(install(args.source, args.expected_before, args.guard_source)))
+    print(json.dumps(install(args.source, args.expected_before, args.guard_source, args.unit)))

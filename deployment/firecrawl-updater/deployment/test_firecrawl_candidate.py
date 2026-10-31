@@ -261,11 +261,16 @@ else: raise SystemExit('unexpected Docker action')
 
     def test_runtime_policy_precedes_update_admission_and_build_is_before_switch(self):
         source=SOURCE.read_text()
-        main=source[source.index('main() {'):]
+        main=source[source.index('\nmain() {'):]
+        cutover=source[source.index('\ncutover_candidate() {'):source.index('\nmain() {')]
         self.assertLess(main.index('  set_restart_policy\n'),main.index('  log "syncing'))
-        self.assertLess(main.index('  prepare_candidate\n'),main.index('  git checkout --detach'))
-        self.assertLess(main.index('  verify_candidate_manifest\n'),main.index('  deployment_started=1'))
-        self.assertNotIn('up --build',main)
+        self.assertLess(main.index('  prepare_candidate\n'),main.index('  gate receipt'))
+        # Scheduled runs never switch source; only an approved cutover does.
+        self.assertNotIn('git checkout',main)
+        self.assertLess(main.index('gate approved'),main.index('  cutover_candidate\n'))
+        self.assertLess(cutover.index('  gate consume'),cutover.index('  git checkout --detach'))
+        self.assertLess(cutover.index('  verify_candidate_manifest\n'),cutover.index('  deployment_started=1'))
+        self.assertNotIn('up --build',source)
 
 
 @unittest.skipUnless(os.name == 'posix', 'Linux installer uses fcntl')
