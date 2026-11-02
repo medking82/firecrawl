@@ -56,7 +56,6 @@ vi.mock("../../../config", () => ({
         ? {
             FIREBILL_URL: "http://firebill.test",
             FIREBILL_SECRET: "fb-secret",
-            FIREBILL_ORG_IDS: ["org-1"],
           }
         : {}),
     };
@@ -203,6 +202,32 @@ describe("the entity a charge is made against", () => {
           value: 5,
         }),
       ]);
+    });
+
+    it("carries the MCP allowance's reset time from firebill", async () => {
+      mockFetch.mockImplementation(
+        async () =>
+          new Response(
+            JSON.stringify({
+              success: true,
+              allowed: false,
+              remaining: 0,
+              resets_at: 1_798_848_000_000,
+            }),
+          ),
+      );
+
+      const result = await new AutumnService().checkCredits({
+        ...charge,
+        featureId: MCP_CREDITS_FEATURE_ID,
+      });
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          allowed: false,
+          resetsAt: 1_798_848_000_000,
+        }),
+      );
     });
 
     it("checks and holds MCP credits with an empty entity", async () => {
