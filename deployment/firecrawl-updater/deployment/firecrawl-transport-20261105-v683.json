@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "profile": "v2.11.683",
+  "scope": "Audited public static-fetch transport only; not whole-image safety or deployment approval",
+  "source_commit": "7d8e92dc5d270b1247d60e809c3fd32f52e0e47b",
+  "baseline_source_commit": "74f81da6935bcbf581480a888c2ed3fd81fc2d85",
+  "baseline_profile": "v2.11.629",
+  "candidate_api_image": "sha256:4c92c7a76dfacec70cd52ba769e252f72dbebf2d5af083dd30cf01b34f2e4b6b",
+  "candidate_build_sha": "7d8e92dc5d270b1247d60e809c3fd32f52e0e47b",
+  "prior_guard_sha256": "07f73956c9531c483ccd9816af9b3aa06de87424dc0ab33758e9daa2c5e16c3d",
+  "dependencies": {"node_major": 22, "undici": "7.30.1", "ipaddr_js": "2.2.0"},
+  "undici_lib_sha256": "213bda9bf7c6860b6714484b606b431c7bdbe4652a20be22e3e20e8b96e1187c",
+  "changed_compiled_hashes": {
+    "/app/dist/src/scraper/scrapeURL/engines/index.js": "a701dc79f1be22db0fc7c4d962ef34abbb5f467ea66f738df82303751ca7296f",
+    "/app/dist/src/scraper/scrapeURL/engines/utils/safeFetch.js": "25944a8f4bcb2986ca9a548df0d8d0fa1476b7c7745465b63f4b599b3baeeb5c",
+    "/app/dist/src/scraper/scrapeURL/engines/utils/downloadFile.js": "8ac395b87365de206b5a585f41be070c3b5cb9fa5f403c6613d19e5bc119e746",
+    "/app/dist/src/scraper/scrapeURL/engines/fetch/index.js": "6500fe7f20d148650a42d11f0b85554b6581016f3c386b71d36f4f3a27a8fd2a",
+    "/app/dist/src/scraper/scrapeURL/engines/pdf/index.js": "23a5a3510e1e6cbbad7f96f65c73c2fff8dc604ddc79bebeb7c0e9e503ab3002",
+    "/app/dist/src/scraper/scrapeURL/index.js": "70fd1b3a607a8367c038df75d5d306514063b62adcd6f2fa99a8f6ec61745e9a",
+    "/app/dist/src/controllers/v2/types.js": "a5bb9e0d2974b4f60488a477e8e73e19d89170d84f7c0ef67a51acfb9e7ccfaa",
+    "/app/dist/src/lib/exchange.js": "048ce694b30a201d5c38e6fd18f8b47cead91e8d6fbbf55925462865d5c276bd"
+  },
+  "audit": [
+    "The source commit and the candidate FIRECRAWL_BUILD_SHA both identify v2.11.683; the GA401 upgrade owner built the candidate on 2026-11-05 (evidence candidate.TTKmXs2E). Source-to-image reproducibility and all upstream code are outside this receipt.",
+    "The candidate's isolated fixed-file probe matches the complete v2.11.629 profile except the eight compiled files listed here. document/index.js, undici/client.js, ipaddr.js, all dependency versions and the full 116-file Undici tree match. The running core (v2.11.642 source 7e6bd701) matched the v2.11.629 profile exactly in the same probe.",
+    "safeFetch.js only adds and exports TLS_CERT_ERROR_CODES, a constant set of certificate error codes. isIPPrivate, the private literal and localhost rejection on the first request and every redirect hop, the connect-time socket remoteAddress check, the redirect interceptor, the ALLOW_LOCAL_WEBHOOKS gate and the PROXY_SERVER branch are unchanged.",
+    "downloadFile.js and fetch/index.js only map the wider certificate error set to SSLError. Both still fetch through getSecureDispatcher, and downloadFile keeps its Content-Length check and streaming size limiter. The second safeFetch require in compiled fetch/index.js comes from a second TypeScript import statement.",
+    "engines/index.js passes the request origin to the Exchange router, skips the Wikipedia engine for zero data retention scrapes and adds an optional warning field. exchange.js refuses Exchange routing when origin is 'exchange' to prevent loops; a caller-supplied origin can only remove Exchange routing, and FIRE_EXCHANGE_URL stays unset.",
+    "scrapeURL/index.js adds a hash-bucketed experiment that, only for fire-engine chrome-cdp tunnel errors, drops the failed engine instead of retrying it; fire-engine is unconfigured. It also treats UsOnlyUnavailableError as terminal, copies the engine warning to the document, and forwards skipTlsVerification to the robots.txt scrape, which still runs through the same engines and secure dispatcher.",
+    "types.js changes the v2 skipTlsVerification default from true (for requests without headers or actions) to false, so TLS is verified unless a request opts out. It also moves the developer category alias helper to lib/developer-category, removes the github search category and adds a skills search source. No URL validation or protected scrape parameter is weakened.",
+    "pdf/index.js adds US-only team routing (teamFlags.usOnly, which requires DB authentication, and USE_DB_AUTHENTICATION is false), passes maxPages to pdf-parse and reconciles page counts. The PDF download path is unchanged; the FIRE_PDF and RunPod routes stay unconfigured.",
+    "Outside the guarded files, gzip sitemaps now pass MAX_GUNZIPPED_FILE_SIZE to fetchFileToBuffer and inflate through gunzipBounded with a 50 MB cap. The new outbound fetches in this range (Vercel Marketplace JWKS at a fixed integrations.vercel.com origin and the skills source through the Alexandria client) take no caller URL. Lockfile changes are follow-redirects 1.16.2, glob 14 and minimatch 11; undici and ipaddr.js are unchanged.",
+    "No private-address, redirect, connect-time address, download-limit or proxy safeguard is weakened. The guard preserves every earlier profile and rejects unknown mixed bytes. Package admission, live smoke and the Owner's cutover approval remain separate gates."
+  ],
+  "validation": [
+    "Disposable containers of the running image sha256:e776bd84d5e7885e81f409e5f5e1d5356d104c1bddfa18ed9f7d8cbbc986d7fa and the candidate image ran with no network, a read-only root, all capabilities dropped and no mounts, credentials or service entrypoint. The frozen guard's fixed probes compared hashes, dependencies and the Undici tree with the v2.11.629 profile.",
+    "The eight changed compiled files were copied from both images and diffed. Every compiled hunk corresponds to the 74f81da6..7d8e92dc TypeScript diff of the same file; the only 74f81da6..7e6bd701 change in these files is a type-only MapResponse edit that compiles away."
+  ]
+}

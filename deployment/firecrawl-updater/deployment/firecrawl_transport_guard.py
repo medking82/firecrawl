@@ -108,6 +108,24 @@ TRANSPORT_PROFILES["v2.11.629"] = {
     "dependencies": {"node_major": 22, "undici": "7.30.1", "ipaddr_js": "2.2.0"},
     "undici_lib_sha256": "213bda9bf7c6860b6714484b606b431c7bdbe4652a20be22e3e20e8b96e1187c",
 }
+# Frozen 683 public-fetch audit: deployment/firecrawl-transport-20261105-v683.json.
+# Complete profile only; package admission and Owner approval remain separate.
+TRANSPORT_PROFILES["v2.11.683"] = {
+    "receipt_sha256": "9b301476c32355e1ec6fbe1808552e2667516d0740f327eeda7bd5de4a30e853",
+    "hashes": {
+        **TRANSPORT_PROFILES["v2.11.629"]["hashes"],
+        "/app/dist/src/scraper/scrapeURL/engines/index.js": "a701dc79f1be22db0fc7c4d962ef34abbb5f467ea66f738df82303751ca7296f",
+        "/app/dist/src/scraper/scrapeURL/engines/utils/safeFetch.js": "25944a8f4bcb2986ca9a548df0d8d0fa1476b7c7745465b63f4b599b3baeeb5c",
+        "/app/dist/src/scraper/scrapeURL/engines/utils/downloadFile.js": "8ac395b87365de206b5a585f41be070c3b5cb9fa5f403c6613d19e5bc119e746",
+        "/app/dist/src/scraper/scrapeURL/engines/fetch/index.js": "6500fe7f20d148650a42d11f0b85554b6581016f3c386b71d36f4f3a27a8fd2a",
+        "/app/dist/src/scraper/scrapeURL/engines/pdf/index.js": "23a5a3510e1e6cbbad7f96f65c73c2fff8dc604ddc79bebeb7c0e9e503ab3002",
+        "/app/dist/src/scraper/scrapeURL/index.js": "70fd1b3a607a8367c038df75d5d306514063b62adcd6f2fa99a8f6ec61745e9a",
+        "/app/dist/src/controllers/v2/types.js": "a5bb9e0d2974b4f60488a477e8e73e19d89170d84f7c0ef67a51acfb9e7ccfaa",
+        "/app/dist/src/lib/exchange.js": "048ce694b30a201d5c38e6fd18f8b47cead91e8d6fbbf55925462865d5c276bd",
+    },
+    "dependencies": {"node_major": 22, "undici": "7.30.1", "ipaddr_js": "2.2.0"},
+    "undici_lib_sha256": "213bda9bf7c6860b6714484b606b431c7bdbe4652a20be22e3e20e8b96e1187c",
+}
 EXPECTED_PREDICATES = {
     "ALLOW_LOCAL_WEBHOOKS_true": False,
     "PROXY_SERVER_nonempty": False,

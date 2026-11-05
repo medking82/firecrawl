@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,17 @@ PROJECTS = ('firecrawl', 'firecrawl-monitor', 'firecrawl-browser')
 HELPER = Path('/home/marck/services/firecrawl-browser/releases/v629-991c7413-e36e048a5aec8533/deployment/patched-base/promote.py')
 HELPER_SHA = '9585cac5d1749169b4ac05d4049b310557c545898622c8b95b83b437cc66ea1c'
 FORBIDDEN = {'CVE-2026-111497'}
+UPGRADE_OWNER = Path.home() / '.local/bin/firecrawl-upgrade'
+GUARDS = Path.home() / '.local/state/firecrawl-updater/guards'
+
+
+def reviewed_guard():
+    """Use the transport guard the installed upgrade owner pins, so both owners admit the same profiles.
+
+    verify-transport.py rejects a guard whose bytes do not hash to the returned file's stem."""
+    pins = re.findall(rb'(?m)^guard_sha256=([a-f0-9]{64})$', UPGRADE_OWNER.read_bytes())
+    if len(pins) != 1: raise RuntimeError('upgrade owner guard pin missing or ambiguous')
+    return GUARDS / (pins[0].decode('ascii') + '.py')
 
 
 def run(args, timeout=900):
@@ -205,7 +217,7 @@ def build(image, directory, project):
     verifier = HELPER.parent / 'verify-transport.py'
     if hashlib.sha256(verifier.read_bytes()).hexdigest() != '558cb5d6354dcdbf7394e70d0f8130e9e43ee5c0fb312cf4b55dd6504f3d4f69':
         raise RuntimeError('transport verifier changed')
-    guard = Path.home() / '.local/state/firecrawl-updater/guards/07f73956c9531c483ccd9816af9b3aa06de87424dc0ab33758e9daa2c5e16c3d.py'
+    guard = reviewed_guard()
     run([sys.executable, '-B', str(verifier), new, str(guard), guard.stem])
     return new
 
