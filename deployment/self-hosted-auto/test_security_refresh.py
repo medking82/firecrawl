@@ -103,7 +103,7 @@ class Policy(unittest.TestCase):
 
 
     def test_transport_guard_follows_the_installed_upgrade_owner_pin(self):
-        digest = '7' * 64
+        digest = 'a7' * 32
         with tempfile.TemporaryDirectory() as tmp:
             owner = Path(tmp) / 'firecrawl-upgrade'
             with patch.object(s, 'UPGRADE_OWNER', owner), patch.object(s, 'GUARDS', Path(tmp) / 'guards'):
