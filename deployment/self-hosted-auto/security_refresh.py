@@ -41,11 +41,22 @@ def status_report(value):
     save(ROOT / 'latest.json', {**value, 'completed_at': dt.datetime.now(dt.timezone.utc).isoformat()})
 
 
+def normalize_api_configuration(value):
+    """Docker 29 reports empty DNS lists as null after recreate; same runtime."""
+    host = value.get('host_config')
+    if isinstance(host, dict):
+        for key in ('Dns', 'DnsOptions', 'DnsSearch'):
+            if key in host and host[key] is None: host[key] = []
+    return value
+
+
 def helper():
     if HELPER.is_symlink() or hashlib.sha256(HELPER.read_bytes()).hexdigest() != HELPER_SHA:
         raise RuntimeError('deployment helper changed')
     spec = importlib.util.spec_from_file_location('refresh_promote', HELPER)
     p = importlib.util.module_from_spec(spec); spec.loader.exec_module(p)
+    raw = p.api_configuration
+    p.api_configuration = lambda row: normalize_api_configuration(raw(row))
     return p
 
 
@@ -60,6 +71,25 @@ def recovery_image(project):
     if len(ids) > 1: raise RuntimeError('ambiguous recovery API')
     if not ids: return None
     return json.loads(run(['docker', 'inspect', ids[0]]))[0]['Image']
+
+
+def remove_orphan_containers():
+    """Remove stopped containers that carry a project's labels but were not made by Compose.
+
+    A legacy-builder step container inherits the API image's compose labels. One
+    that outlives its build looks like a second `api` to every ownership check,
+    which then stops each later update. Compose always sets container-number.
+    """
+    for project in PROJECTS:
+        ids = run(['docker', 'ps', '-aq', '--no-trunc', '--filter', 'label=com.docker.compose.project=' + project,
+                   '--filter', 'status=exited', '--filter', 'status=created']).split()
+        for cid in ids:
+            try: row = json.loads(run(['docker', 'container', 'inspect', cid]))[0]
+            except RuntimeError: continue  # Removed concurrently.
+            labels = row['Config']['Labels'] or {}
+            if 'com.docker.compose.container-number' in labels or row['State']['Status'] not in ('exited', 'created'):
+                continue
+            run(['docker', 'rm', cid])
 
 
 def verify_runtime(p, project, snapshot):
@@ -164,6 +194,7 @@ def build(image, directory, project):
         # A running untagged base can gain this sole temporary tag. Ordinary
         # rmi then refuses to remove it; force removes only our temporary ref.
         run(['docker', 'image', 'rm', '--no-prune', '--force', tag])
+        remove_orphan_containers()
     patched = json.loads(run(['docker', 'image', 'inspect', new]))[0]
     # USER root and USER <original> can canonicalize empty user to root.
     expected = dict(config['Config']); actual = dict(patched['Config'])
@@ -242,7 +273,8 @@ def update(p, root, prepare_only=False):
     cache = root / 'cache'
     generation = owner.refresh_cache(cache)
     directory = root / ('run-' + uuid.uuid4().hex); directory.mkdir(mode=0o700)
-    snapshots = {k: p.project_snapshot(k) for k in PROJECTS}
+    remove_orphan_containers()
+    snapshots ={k: p.project_snapshot(k) for k in PROJECTS}
     old = {k: snapshots[k]['services']['api']['Image'] for k in PROJECTS}
     new = {}; checks = {}
     with tempfile.TemporaryDirectory(dir=directory) as temporary:
