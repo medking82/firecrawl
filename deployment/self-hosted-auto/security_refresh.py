@@ -73,6 +73,25 @@ def recovery_image(project):
     return json.loads(run(['docker', 'inspect', ids[0]]))[0]['Image']
 
 
+def remove_orphan_containers():
+    """Remove stopped containers that carry a project's labels but were not made by Compose.
+
+    A legacy-builder step container inherits the API image's compose labels. One
+    that outlives its build looks like a second `api` to every ownership check,
+    which then stops each later update. Compose always sets container-number.
+    """
+    for project in PROJECTS:
+        ids = run(['docker', 'ps', '-aq', '--no-trunc', '--filter', 'label=com.docker.compose.project=' + project,
+                   '--filter', 'status=exited', '--filter', 'status=created']).split()
+        for cid in ids:
+            try: row = json.loads(run(['docker', 'container', 'inspect', cid]))[0]
+            except RuntimeError: continue  # Removed concurrently.
+            labels = row['Config']['Labels'] or {}
+            if 'com.docker.compose.container-number' in labels or row['State']['Status'] not in ('exited', 'created'):
+                continue
+            run(['docker', 'rm', cid])
+
+
 def verify_runtime(p, project, snapshot):
     ids = run(['docker','ps','-aq','--filter','label=com.docker.compose.project='+project]).splitlines()
     rows = [p.inspect('container', cid) for cid in ids]
@@ -175,6 +194,7 @@ def build(image, directory, project):
         # A running untagged base can gain this sole temporary tag. Ordinary
         # rmi then refuses to remove it; force removes only our temporary ref.
         run(['docker', 'image', 'rm', '--no-prune', '--force', tag])
+        remove_orphan_containers()
     patched = json.loads(run(['docker', 'image', 'inspect', new]))[0]
     # USER root and USER <original> can canonicalize empty user to root.
     expected = dict(config['Config']); actual = dict(patched['Config'])
@@ -253,7 +273,8 @@ def update(p, root, prepare_only=False):
     cache = root / 'cache'
     generation = owner.refresh_cache(cache)
     directory = root / ('run-' + uuid.uuid4().hex); directory.mkdir(mode=0o700)
-    snapshots = {k: p.project_snapshot(k) for k in PROJECTS}
+    remove_orphan_containers()
+    snapshots ={k: p.project_snapshot(k) for k in PROJECTS}
     old = {k: snapshots[k]['services']['api']['Image'] for k in PROJECTS}
     new = {}; checks = {}
     with tempfile.TemporaryDirectory(dir=directory) as temporary:

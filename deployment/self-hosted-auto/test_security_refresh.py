@@ -109,5 +109,37 @@ class Policy(unittest.TestCase):
         self.assertNotEqual(s.normalize_api_configuration(config(Dns=['1.1.1.1'], DnsOptions=None, DnsSearch=None)), empty)
         self.assertEqual(s.normalize_api_configuration(config()), config())
 
+    def test_orphan_build_container_removed_and_compose_containers_kept(self):
+        rows = {
+            'orphan': {'Config': {'Labels': {'com.docker.compose.project': 'firecrawl',
+                                             'com.docker.compose.service': 'api'}}, 'State': {'Status': 'exited'}},
+            'init': {'Config': {'Labels': {'com.docker.compose.project': 'firecrawl',
+                                           'com.docker.compose.service': 'foundationdb-init',
+                                           'com.docker.compose.container-number': '1'}}, 'State': {'Status': 'exited'}},
+        }
+        calls = []
+        def fake(args, timeout=900):
+            calls.append(args)
+            if args[:2] == ['docker', 'ps']:
+                return 'orphan\ninit\ngone' if 'label=com.docker.compose.project=firecrawl' in args else ''
+            if args[:3] == ['docker', 'container', 'inspect']:
+                if args[3] == 'gone': raise RuntimeError('command failed')
+                return json.dumps([rows[args[3]]])
+            if args[:2] == ['docker', 'rm']: return ''
+            raise AssertionError(args)
+        with patch.object(s, 'run', side_effect=fake):
+            s.remove_orphan_containers()
+        self.assertEqual([a for a in calls if a[:2] == ['docker', 'rm']], [['docker', 'rm', 'orphan']])
+
+    def test_failed_build_still_removes_orphan_containers(self):
+        config = json.dumps([{'Config': {'User': ''}, 'RootFS': {'Layers': []}}])
+        def fake(args, timeout=900):
+            return config if args[:3] == ['docker', 'image', 'inspect'] else ''
+        with tempfile.TemporaryDirectory() as tmp, patch.object(s, 'run', side_effect=fake), \
+                patch.object(s.subprocess, 'run', return_value=s.subprocess.CompletedProcess([], 1)), \
+                patch.object(s, 'remove_orphan_containers') as cleanup:
+            with self.assertRaises(RuntimeError): s.build('image', Path(tmp), 'firecrawl')
+            cleanup.assert_called_once()
+
 
 if __name__ == '__main__': unittest.main()
