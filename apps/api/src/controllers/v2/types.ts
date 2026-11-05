@@ -11,6 +11,7 @@ import { hasReachableHost } from "../../lib/url-utils";
 import { countries } from "../../lib/validate-country";
 import { includesFormat } from "../../lib/format-utils";
 import { addPathRegexIssues, pathPatternsSchema } from "../../lib/crawl-regex";
+import { isDeveloperCategoryAlias } from "../../lib/developer-category";
 import { addStrictSchemaIssue } from "../../lib/openai-strict-schema";
 import {
   ExtractorOptions,
@@ -927,12 +928,7 @@ export const applyScrapeOptionsDefaults = <T extends ScrapeOptionsBase>(
   obj: T,
 ): T & { skipTlsVerification: boolean } => ({
   ...obj,
-  skipTlsVerification:
-    obj.skipTlsVerification ??
-    ((obj.headers && Object.keys(obj.headers).length > 0) ||
-    (obj.actions && obj.actions.length > 0)
-      ? false
-      : true),
+  skipTlsVerification: obj.skipTlsVerification ?? false,
 });
 
 /**
@@ -1662,6 +1658,8 @@ export type ErrorResponse = {
   details?: any;
   sponsor_status?: string;
   login_url?: string;
+  replacement?: string;
+  documentation_url?: string;
 };
 
 export type ScrapeResponse =
@@ -2189,6 +2187,9 @@ export type TeamFlags = {
   // The org's contract bars training on its data: FirePDF never captures its
   // documents (buildFirePdfTrainingCapture).
   trainingRestricted?: boolean;
+  // Every request is processed by US-based vendors only. A route with no US
+  // vendor is refused or skipped with a warning.
+  usOnly?: boolean;
   organizationDataSourceAccess?: Record<
     string,
     {
@@ -2521,10 +2522,6 @@ const newsSearchSourceOptions = z.strictObject({
 });
 
 // Category source type definitions
-const githubCategoryOptions = z.strictObject({
-  type: z.literal("github"),
-});
-
 const researchCategoryOptions = z.strictObject({
   type: z.literal("research"),
 });
@@ -2540,20 +2537,6 @@ const developerCategoryOptions = z.strictObject({
 const govCategoryOptions = z.strictObject({
   type: z.literal("gov"),
 });
-
-const developerCategoryAliases = new Set([
-  "repo",
-  "code",
-  "developer",
-  "docs",
-  "devdex",
-  "repo_search",
-  "developer_index",
-]);
-
-function isDeveloperCategoryAlias(value: unknown): value is string {
-  return typeof value === "string" && developerCategoryAliases.has(value);
-}
 
 function normalizeDeveloperCategoryAliases(value: unknown): unknown {
   if (!Array.isArray(value)) return value;
@@ -2605,7 +2588,7 @@ export const searchRequestSchema = z
     sources: z
       .union([
         // Array of strings (simple format)
-        z.array(z.enum(["web", "images", "news", "alexandria"])),
+        z.array(z.enum(["web", "images", "news", "alexandria", "skills"])),
         // Array of objects (advanced format)
         z.array(
           z.union([
@@ -2615,6 +2598,9 @@ export const searchRequestSchema = z
             z.strictObject({
               type: z.literal("alexandria"),
             }),
+            z.strictObject({
+              type: z.literal("skills"),
+            }),
           ]),
         ),
       ])
@@ -2623,10 +2609,9 @@ export const searchRequestSchema = z
       .preprocess(
         normalizeDeveloperCategoryAliases,
         z.union([
-          z.array(z.enum(["github", "research", "pdf", "developer", "gov"])),
+          z.array(z.enum(["research", "pdf", "developer", "gov"])),
           z.array(
             z.union([
-              githubCategoryOptions,
               researchCategoryOptions,
               pdfCategoryOptions,
               developerCategoryOptions,
@@ -2781,10 +2766,6 @@ export const searchRequestSchema = z
         // It's a string array, transform to object array
         categories = (categories as string[]).map(c => {
           switch (c) {
-            case "github":
-              return {
-                type: "github" as const,
-              };
             case "research":
               return {
                 type: "research" as const,

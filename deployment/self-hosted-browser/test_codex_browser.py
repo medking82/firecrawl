@@ -389,8 +389,10 @@ function load(text, customRequire) {
 }
 const agent = load(source('local-browser-agent.ts'), id => id === './hangar' ? {executeHangarBrowser} : require(id));
 const cloud = () => {cloudCalls++; throw Error('Cloud must not run');};
+const usOnly = load(source('us-only.ts'), require);
 const native = load(source('scrape-interact/browser-agent.ts'), id => {
   if (id === '../local-browser-agent') return agent;
+  if (id === '../us-only') return usOnly;
   if (id === '../hangar') return {executeHangarBrowser};
   if (id === '../../config') return {config:{IS_PRODUCTION:false}};
   if (id === '../logger') return {logger:{}};
