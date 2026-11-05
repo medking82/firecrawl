@@ -102,6 +102,18 @@ class Policy(unittest.TestCase):
                 self.assertTrue((root/'admission-paused').exists())
 
 
+    def test_transport_guard_follows_the_installed_upgrade_owner_pin(self):
+        digest = '7' * 64
+        with tempfile.TemporaryDirectory() as tmp:
+            owner = Path(tmp) / 'firecrawl-upgrade'
+            with patch.object(s, 'UPGRADE_OWNER', owner), patch.object(s, 'GUARDS', Path(tmp) / 'guards'):
+                owner.write_text('#!/usr/bin/env bash\nguard_sha256=' + digest + '\n')
+                self.assertEqual(s.reviewed_guard(), Path(tmp) / 'guards' / (digest + '.py'))
+                for text in ('#!/usr/bin/env bash\n', '#!/usr/bin/env bash\nguard_sha256=' + digest + '\nguard_sha256=' + '8' * 64 + '\n',
+                             '#!/usr/bin/env bash\n  guard_sha256=' + digest + '\n', '#!/usr/bin/env bash\nguard_sha256=' + digest.upper() + '\n'):
+                    owner.write_text(text)
+                    with self.assertRaises(RuntimeError): s.reviewed_guard()
+
     def test_docker29_null_dns_lists_are_not_configuration_drift(self):
         def config(**dns): return {'config': {}, 'host_config': {'NetworkMode': 'firecrawl_backend', **dns}, 'mounts': []}
         empty = config(Dns=[], DnsOptions=[], DnsSearch=[])
