@@ -57,6 +57,7 @@ import {
 import { wantsDeveloperCategory } from "../../search/developer";
 import { wantsGovCategory } from "../../search/gov";
 import {
+  consumeIndexRateLimit,
   indexDailyLimitRefusal,
   reserveIndexCalls,
 } from "../../lib/index-daily-limit";
@@ -69,7 +70,7 @@ import {
   autoToolsEnabled,
   queryInferenceEnabled,
 } from "../../search/tool-intent";
-import { isUsOnly } from "../../lib/us-only";
+import { isUsOnly, usOnlyLocationRefusal } from "../../lib/us-only";
 import { UsOnlyUpstreamRefusalError } from "../../lib/research-upstream";
 import { UsOnlyUnavailableError } from "../../scraper/scrapeURL/error";
 
@@ -336,6 +337,21 @@ async function searchControllerInner(
       });
     }
 
+    const usOnlyLocationError =
+      requestedFormats.length > 0
+        ? usOnlyLocationRefusal(
+            req.acuc?.flags,
+            req.body.scrapeOptions?.location?.country,
+          )
+        : undefined;
+    if (usOnlyLocationError) {
+      return res.status(403).json({
+        success: false,
+        code: "US_ONLY_UNAVAILABLE",
+        error: usOnlyLocationError,
+      });
+    }
+
     // Search only scrapes (and only honors scrapeOptions) when formats are
     // requested, so the scrape-option checks apply only then.
     if (
@@ -466,6 +482,24 @@ async function searchControllerInner(
       logger.warn("Had to wait for log request promise to complete", {
         timeMs: waited,
       });
+
+    if (govSearch) {
+      const perMinute = await consumeIndexRateLimit(
+        "gov",
+        req.auth.team_id,
+        req.acuc?.rate_limit_multiplier ?? 1,
+        req.acuc?.flags,
+        1,
+      );
+      if (!perMinute.ok) {
+        res.setHeader("Retry-After", String(perMinute.retryAfterSeconds));
+        return res.status(429).json({
+          success: false,
+          error: perMinute.error,
+          retry_after_seconds: perMinute.retryAfterSeconds,
+        });
+      }
+    }
 
     if (projectedKeylessCredits > 0) {
       const reservation = await reserveKeylessCredits(
