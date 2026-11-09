@@ -5,8 +5,8 @@ on:
     - cron: '7 */6 * * *'
   workflow_dispatch:
 
-# The dedicated token needs Contents and Workflows write access to this fork.
-# GITHUB_TOKEN cannot sync upstream changes to workflow files.
+# This token must trigger push CI: Contents/Workflows write and Checks read.
+# GITHUB_TOKEN pushes do not trigger the candidate's required LF job.
 permissions: {}
 
 concurrency:
@@ -17,30 +17,51 @@ jobs:
   sync:
     if: github.repository == 'medking82/firecrawl' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
-      - name: Merge upstream into the fork
+      - name: Validate sync token and upstream
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
           GH_REPOSITORY: ${{ github.repository }}
-          EXPECTED_UPSTREAM: firecrawl/firecrawl
-          SYNC_BRANCH: main
         run: |
+          set -Eeuo pipefail
           if [[ -z "$GH_TOKEN" ]]; then
-            echo "::error::Set UPSTREAM_SYNC_TOKEN with Contents and Workflows write access to $GH_REPOSITORY."
+            echo "::error::Set UPSTREAM_SYNC_TOKEN with Contents/Workflows write and Checks read access to $GH_REPOSITORY."
             exit 1
           fi
-
           actual_upstream="$(gh api "repos/$GH_REPOSITORY" --jq '.parent.full_name')"
-          if [[ "$actual_upstream" != "$EXPECTED_UPSTREAM" ]]; then
+          if [[ "$actual_upstream" != firecrawl/firecrawl ]]; then
             echo "::error::The fork's upstream changed. Review the source before syncing."
             exit 1
           fi
 
-          # GitHub merges without rewriting fork commits; conflicts stop the run.
-          gh api \
-            --method POST \
-            --header "X-GitHub-Api-Version: 2026-03-10" \
-            "repos/$GH_REPOSITORY/merge-upstream" \
-            --field "branch=$SYNC_BRANCH"
+      - name: Checkout fork history
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
+
+      - name: Publish candidate, require LF success, then fast-forward main
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
+          FIRECRAWL_SYNC_REPOSITORY: ${{ github.repository }}
+          FIRECRAWL_UPDATE_STATE_DIR: ${{ runner.temp }}/firecrawl-fork-sync
+        run: |
+          set -Eeuo pipefail
+          git remote add upstream https://github.com/firecrawl/firecrawl.git
+          mkdir -m 700 -p "$FIRECRAWL_UPDATE_STATE_DIR"
+          source deployment/firecrawl-updater/deployment/firecrawl_update.sh
+          sync_fork_main
+
+      - name: Preserve sync evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fork-sync-evidence
+          path: |
+            ${{ runner.temp }}/firecrawl-fork-sync/fork-sync.*/snapshots
+            ${{ runner.temp }}/firecrawl-fork-sync/fork-sync.*/lf-check-runs.json
+          if-no-files-found: ignore

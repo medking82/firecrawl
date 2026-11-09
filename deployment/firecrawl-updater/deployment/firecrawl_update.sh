@@ -30,9 +30,49 @@ retired_agents=0
 
 log() { printf '%s %s\n' "$(date --iso-8601=seconds)" "$*"; }
 
-# Embedded in the updater by build-updater.py. Caller holds updater run.lock.
+# Require the GitHub Actions LF job for the published commit, never another tip.
+wait_for_sync_lf_check() {
+  python3 -B - "$1" "$2" <<'PYLF'
+import json, os, re, subprocess, sys, time
+from pathlib import Path
+
+sha, evidence = sys.argv[1], Path(sys.argv[2])
+repo = os.environ.get('FIRECRAWL_SYNC_REPOSITORY', 'medking82/firecrawl')
+timeout = os.environ.get('FIRECRAWL_SYNC_CHECK_TIMEOUT', '600')
+if (not re.fullmatch(r'[0-9a-f]{40}', sha)
+        or not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repo)
+        or not timeout.isdecimal() or not 0 <= int(timeout) <= 600):
+    raise SystemExit('Invalid fork sync check configuration')
+deadline = time.monotonic() + int(timeout)
+endpoint = f'repos/{repo}/commits/{sha}/check-runs?check_name=LF%20policy&filter=latest&per_page=100'
+while True:
+    try:
+        result = subprocess.run(['gh', 'api', '--paginate', '--slurp',
+            '-H', 'Accept: application/vnd.github+json', endpoint],
+            capture_output=True, text=True, check=True,
+            timeout=max(1, min(30, deadline - time.monotonic())))
+        pages = json.loads(result.stdout)
+        checks = [check for page in pages for check in page['check_runs']
+                  if check['name'] == 'LF policy' and check['head_sha'] == sha
+                  and check.get('app', {}).get('slug') == 'github-actions']
+        (evidence / 'lf-check-runs.json').write_text(result.stdout, encoding='utf-8')
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        raise SystemExit('Fork sync LF check unavailable; main unchanged') from None
+    if any(check.get('status') == 'completed' and check.get('conclusion') != 'success' for check in checks):
+        raise SystemExit('Fork sync LF check failed; main unchanged')
+    if checks and all(check.get('status') == 'completed' and check.get('conclusion') == 'success' for check in checks):
+        print('Fork sync LF policy passed for ' + sha)
+        break
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise SystemExit('Fork sync LF check pending or missing at timeout; main unchanged')
+    time.sleep(min(10, remaining))
+PYLF
+}
+
+# Caller holds updater run.lock (Actions has a separate concurrency group).
 sync_fork_main() {
-  local sync_dir work_dir origin_ref upstream_ref origin_oid upstream_oid merged_oid remote_origin remote_upstream prior
+  local sync_dir work_dir origin_ref upstream_ref origin_oid upstream_oid merged_oid remote_origin remote_upstream prior candidate_branch
   for prior in "$state_dir"/fork-sync.*; do
     [[ -d "$prior/worktree" ]] || continue
     if [[ ! -f "$prior/snapshots" ]] || ! grep -qx 'status=complete' "$prior/snapshots"; then
@@ -76,6 +116,23 @@ sync_fork_main() {
     log "fork sync remote moved; preserved $sync_dir"; return 1;
   }
   if [[ "$merged_oid" != "$origin_oid" ]]; then
+    candidate_branch="updater/fork-sync-$merged_oid"
+    printf 'candidate_branch=%s\n' "$candidate_branch" >>"$sync_dir/snapshots"
+    git push origin "$merged_oid:refs/heads/$candidate_branch" || { log "fork sync candidate push rejected; preserved $sync_dir"; return 1; }
+    if ! wait_for_sync_lf_check "$merged_oid" "$sync_dir"; then
+      # Check failures retain evidence and the remote candidate, but permit the
+      # next unattended run to retry. Conflicts and Git failures still stop.
+      printf 'status=check_blocked\n' >>"$sync_dir/snapshots"
+      git worktree remove "$work_dir" || return 1
+      log "fork sync main unchanged; check evidence $sync_dir"
+      return 1
+    fi
+    # CI can take minutes; recheck both inputs after waiting as well.
+    remote_origin=$(git ls-remote --exit-code origin refs/heads/main) || return 1
+    remote_upstream=$(git ls-remote --exit-code upstream refs/heads/main) || return 1
+    [[ "$remote_origin" == "$origin_oid"$'\t'refs/heads/main && "$remote_upstream" == "$upstream_oid"$'\t'refs/heads/main ]] || {
+      log "fork sync remote moved during LF check; preserved $sync_dir"; return 1;
+    }
     git push origin "$merged_oid:refs/heads/main" || { log "fork sync push rejected; preserved $sync_dir"; return 1; }
   fi
   git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main || return 1

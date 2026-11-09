@@ -20,6 +20,7 @@ concurrency:
 
 jobs:
   sync:
+    if: github.repository == 'firecrawl/firecrawl'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout monorepo
