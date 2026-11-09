@@ -85,13 +85,13 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual([b['reasoning_effort'] for b in bodies[3:]], ['low', 'medium'])
         self.assertEqual(bodies[0]['input'], 'x')
 
-    def test_no_effort_configured_leaves_body_unchanged(self):
+    def test_no_effort_preserves_payload_and_pins_transport(self):
         self.server.effort = None
         try:
             self.call('/v1/responses')
         finally:
             self.server.effort = bridge.EFFORT
-        self.assertEqual(self.upstream.calls[-1][1], {'model': 'gpt-6-luna--fast', 'input': 'x'})
+        self.assertEqual(self.upstream.calls[-1][1], {'model': 'codex/gpt-6-luna--fast', 'input': 'x'})
 
     def test_missing_host_token_sends_no_authorization(self):
         self.assertEqual(self.call()[0], 200)

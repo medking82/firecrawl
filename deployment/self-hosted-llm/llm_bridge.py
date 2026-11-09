@@ -1,11 +1,11 @@
-"""OpenAI-compatible relay from the core Firecrawl API container to GA401 opencodex-proxy.
+"""OpenAI-compatible relay from the core Firecrawl API container to GA401 Magpie.
 
 The core image calls its model provider over HTTP only (OPENAI_BASE_URL), so unlike
 the monitor judge and browser LLM bridges this cannot be a Unix socket. It listens
 on the docker0 address and admits a request only when all of these hold: the peer
 is the current core API container, the bearer is the bridge key from the core .env,
 the route is Responses or Chat Completions, the body is JSON and the model is
-allowed. The opencodex token stays on the host. Logs never hold prompts, page
+allowed. The Magpie caller key stays on the host. Logs never hold prompts, page
 content or credentials.
 """
 import argparse
@@ -21,11 +21,11 @@ import time
 from pathlib import Path
 
 LISTEN = ('172.17.0.1', 10180)
-UPSTREAM = ('127.0.0.1', 10100)
+UPSTREAM = ('127.0.0.1', 3425)
 CONTAINER = 'firecrawl-api-1'
 STATE = Path.home() / '.local/state/firecrawl-core-llm'
 KEY_FILE = STATE / 'bridge-key'
-TOKEN_FILE = Path.home() / '.opencodex/service-api-token'
+TOKEN_FILE = STATE / 'magpie-key'
 MODELS = ('gpt-6.1-terra',)
 EFFORT = 'low'
 EFFORTS = ('none', 'minimal', 'low', 'medium', 'high', 'xhigh')
@@ -125,8 +125,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if model not in self.server.models:
             return self.reply(400, 'model_not_allowed')
         effort = self.server.effort
-        # The core API never sends an effort, and opencodex has no `<model>--<effort>` id
-        # for ChatGPT models, so the configured effort is added unless the caller set one.
+        # Preserve the caller's bare model allowlist while pinning its subscription transport.
+        body['model'] = 'codex/' + model
+        # Add the configured reasoning level only when the caller did not set one.
         if effort and self.path == '/v1/responses' and not isinstance(body.get('reasoning'), dict):
             body['reasoning'] = {'effort': effort}
         elif effort and self.path == '/v1/responses':
