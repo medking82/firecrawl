@@ -185,6 +185,23 @@ class LFPolicyTests(unittest.TestCase):
         self.assertEqual(marker.read_text(), "ran\n")
         self.assertNotIn(b"double-check", result.stderr)
 
+    def test_history_preserves_default_and_alternate_indexes(self):
+        default = self.root / ".git/index"
+        before = default.read_bytes()
+        alt = Path(self.temp.name) / "alternate-index"
+        env = dict(self.env, GIT_INDEX_FILE=str(alt))
+        self.git("read-tree", "HEAD", env=env)
+        alternate_before = alt.read_bytes()
+        self.assertEqual(self.checker("--commits", "HEAD", env=env).returncode, 0)
+        self.assertEqual(default.read_bytes(), before)
+        self.assertEqual(alt.read_bytes(), alternate_before)
+
+    def test_history_handles_literal_pathspec_characters_and_tabs(self):
+        self.commit_raw("odd [1]\tfile.py", b"bad\r\n", "odd path")
+        result = self.checker("--commits", "HEAD")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(b"odd [1]\tfile.py", result.stderr)
+
     def test_pre_push_deletion_does_not_scan_unrelated_worktree(self):
         self.add_remote()
         self.git("push", "-q", "origin", "main:disposable")

@@ -6,7 +6,7 @@ import sys
 import tempfile
 
 # Immutable upstream history predates this fork's LF policy.
-POLICY_BASE = "0feb5f379"
+POLICY_BASE = "0feb5f379a2657623a3acc5ca7108a22dcf7c852"
 
 
 def git(*args, check=True):
