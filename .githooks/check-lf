@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+policy_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    # Git for Windows; qualify Python execution in the installed WSL distro.
+    exec wsl.exe -d Ubuntu-26.04 --cd "$(pwd -W)" --exec python3 .github/scripts/check-line-endings.py
+    ;;
+  *) exec python3 "$policy_root/.github/scripts/check-line-endings.py" ;;
+esac
