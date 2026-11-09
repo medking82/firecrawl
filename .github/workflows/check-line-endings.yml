@@ -1,0 +1,17 @@
+name: LF line endings
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Reject CRLF and mixed text in Git
+        run: python3 .github/scripts/check-line-endings.py
