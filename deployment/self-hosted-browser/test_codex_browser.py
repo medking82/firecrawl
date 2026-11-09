@@ -13,7 +13,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import codex_browser as browser
-import codex_judge
+import magpie_judge
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('browser_bridge', Path(__file__).with_name('browser-bridge.py'))
@@ -27,10 +27,10 @@ def request_value(**changes):
 
 
 class BrowserContracts(unittest.TestCase):
-    def test_reuses_native_adapter_with_schema_and_remaining_deadline(self):
+    def test_uses_magpie_adapter_with_schema_and_remaining_deadline(self):
         decision = {'code': 'console.log(await page.title())', 'done': False, 'summary': 'Read title'}
-        result = {'text': json.dumps(decision), 'backend': 'codex-cli', 'model': 'gpt-6.1-sol',
-                  'settings': {'model': 'gpt-6.1-sol', 'model_reasoning_effort': 'max', 'service_tier': 'priority'},
+        result = {'text': json.dumps(decision), 'backend': 'magpie', 'model': 'gpt-6.1-terra',
+                  'settings': {'model': 'gpt-6.1-terra', 'model_reasoning_effort': 'medium'},
                   'tool_calls': 0, 'usage': {'private': 'not logged'}}
         with patch.object(browser, 'judge', return_value=result) as run:
             with patch('sys.stdout', new_callable=io.StringIO) as log:
@@ -41,7 +41,7 @@ class BrowserContracts(unittest.TestCase):
             self.assertNotIn('Read title', log.getvalue())
             args, kwargs = run.call_args
             self.assertIn('untrusted page', args[1])
-            self.assertEqual(kwargs, {'timeout': 12, 'codex_home': None, 'schema': browser.SCHEMA})
+            self.assertEqual(kwargs, {'timeout': 12, 'schema': browser.SCHEMA})
             self.assertNotIn('model', kwargs)
             run.assert_called_once()
 
@@ -80,34 +80,31 @@ class BrowserContracts(unittest.TestCase):
                 browser.browser_step(request_value())
             run.assert_called_once()
 
-    def test_shared_subprocess_contract_preserves_selection_and_browser_schema(self):
+    def test_shared_magpie_contract_carries_browser_schema_and_deadline(self):
+        decision = {'code': '', 'done': True, 'summary': 'Observed answer'}
+        self.assertIs(browser.judge, magpie_judge.judge)
         with tempfile.TemporaryDirectory() as temp:
-            home = Path(temp)
-            (home / 'auth.json').write_text('{"auth_mode":"chatgpt","tokens":{"access_token":"private"}}')
-            (home / 'config.toml').write_text('model="gpt-6.1-sol"\nmodel_reasoning_effort="max"\nservice_tier="priority"')
-            (home / 'models_cache.json').write_text('{"models":[{"slug":"gpt-6.1-sol"}]}')
-            decision = {'code': '', 'done': True, 'summary': 'Observed answer'}
+            key = Path(temp) / 'key'
+            key.write_text('private')
+            sent = {}
 
-            def spawn(args, **kwargs):
-                self.assertEqual(args[0], codex_judge.CLI)
-                for setting in ['model="gpt-6.1-sol"', 'model_reasoning_effort="max"',
-                                'service_tier="priority"', 'forced_login_method="chatgpt"',
-                                'features.shell_tool=false', 'mcp_servers={}']:
-                    self.assertIn(setting, args)
-                self.assertNotIn('OPENAI_API_KEY', kwargs['env'])
-                self.assertNotIn('OPENAI_BASE_URL', kwargs['env'])
-                schema_path = Path(args[args.index('--output-schema') + 1])
-                self.assertEqual(json.loads(schema_path.read_text()), browser.SCHEMA)
-                Path(args[args.index('--output-last-message') + 1]).write_text(json.dumps(decision))
-                kwargs['stdout'].write(b'{"type":"turn.completed","usage":{}}\n')
-                proc = Mock(returncode=0)
-                proc.communicate.side_effect = lambda payload, timeout: self.assertEqual(timeout, 12)
-                return proc
+            def connect(host, port, timeout):
+                self.assertEqual(((host, port), timeout), (magpie_judge.UPSTREAM, 12))
+                conn = Mock()
+                conn.request.side_effect = lambda method, path, body, headers: sent.update(
+                    path=path, body=json.loads(body), auth=headers['Authorization'])
+                conn.getresponse.return_value = Mock(status=200, read=Mock(return_value=json.dumps({
+                    'status': 'completed', 'output': [{'type': 'message', 'content': [
+                        {'type': 'output_text', 'text': json.dumps(decision)}]}]}).encode()))
+                return conn
 
-            with patch.dict(os.environ, {'OPENAI_API_KEY': 'forbidden', 'OPENAI_BASE_URL': 'https://forbidden.invalid'}):
-                with patch.object(codex_judge.subprocess, 'Popen', side_effect=spawn) as run:
-                    self.assertEqual(browser.browser_step(request_value(), codex_home=home), decision)
-                    run.assert_called_once()
+            with patch.dict(os.environ, {'MAGPIE_JUDGE_TOKEN_FILE': str(key)}):
+                with patch.object(magpie_judge.http.client, 'HTTPConnection', side_effect=connect):
+                    self.assertEqual(browser.browser_step(request_value()), decision)
+        self.assertEqual((sent['path'], sent['auth']), ('/v1/responses', 'Bearer private'))
+        self.assertTrue(sent['body']['model'].startswith('codex/'))
+        self.assertEqual(sent['body']['text']['format']['schema'], browser.SCHEMA)
+        self.assertEqual(sent['body']['tools'], [])
 
 
 class BridgeContracts(unittest.TestCase):

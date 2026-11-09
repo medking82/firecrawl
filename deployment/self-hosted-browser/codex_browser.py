@@ -1,12 +1,11 @@
-"""One text-only native Codex CLI browser decision; execution stays in Hangar."""
+"""One text-only browser decision via the local Magpie gateway; execution stays in Hangar."""
 import json
 from pathlib import Path
 import sys
 
-# Reuse the reviewed native command, subscription authentication, selection,
-# capability catalog and process timeout policy. Do not copy a provider adapter.
+# Magpie owns provider routing, quota and credentials (shared with the core LLM bridge).
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'self-hosted-monitor'))
-from codex_judge import judge
+from magpie_judge import judge
 
 SCHEMA = {
     'type': 'object', 'additionalProperties': False,
@@ -69,15 +68,14 @@ def validate_decision(value):
     return value
 
 
-def browser_step(value, *, codex_home=None):
+def browser_step(value):
     value = validate_request(value)
     result = judge(SYSTEM, json.dumps({
         'task': value['task'], 'snapshot': value['snapshot'],
         'history': value['history'],
-    }, ensure_ascii=False), timeout=value['timeout'], codex_home=codex_home,
-        schema=SCHEMA)
+    }, ensure_ascii=False), timeout=value['timeout'], schema=SCHEMA)
     decision = validate_decision(json.loads(result['text']))
-    # Evidence of the actual subscription CLI route, without tasks, snapshots,
+    # Evidence of the actual Magpie route, without tasks, snapshots,
     # generated code, answer text, usage detail or credential material.
     print(json.dumps({key: result[key] for key in (
         'backend', 'model', 'settings', 'tool_calls',
