@@ -166,6 +166,30 @@ else: raise SystemExit('unexpected Docker action')
         self.assertNotEqual(self.candidate('v2.11.683').returncode, 0)
         self.assertEqual(json.loads((self.evidence/'checks.json').read_text())['status'], 'awaiting_transport_review')
 
+    def test_704_profile_receipt_and_mixed_bytes(self):
+        spec = importlib.util.spec_from_file_location('profile_guard_704', GUARD)
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        profile, previous = module.TRANSPORT_PROFILES['v2.11.704'], module.TRANSPORT_PROFILES['v2.11.683']
+        receipt_path = ROOT / 'deployment/firecrawl-transport-20261109-v704.json'
+        receipt = json.loads(receipt_path.read_text())
+        self.assertEqual(hashlib.sha256(receipt_path.read_bytes()).hexdigest(), profile['receipt_sha256'])
+        # The receipt names exactly the compiled files that differ from the audited baseline.
+        changed = {key: value for key, value in profile['hashes'].items() if previous['hashes'][key] != value}
+        self.assertEqual(changed, receipt['changed_compiled_hashes'])
+        self.assertEqual(len(changed), 2)
+        self.assertEqual((profile['dependencies'], profile['undici_lib_sha256']),
+                         (receipt['dependencies'], receipt['undici_lib_sha256']))
+        self.assertEqual(receipt['baseline_profile'], 'v2.11.683')
+        self.probe['hashes'] = copy.deepcopy(profile['hashes'])
+        self.probe['dependencies'] = copy.deepcopy(profile['dependencies'])
+        self.assertEqual(self.candidate('v2.11.704').returncode, 0)
+        self.assertEqual(json.loads((self.evidence/'checks.json').read_text())['transport_check']['transport_profile'], 'v2.11.704')
+        # One 683-era exchange beside the other 704 bytes is an unknown profile.
+        self.probe['hashes']['/app/dist/src/lib/exchange.js'] = \
+            previous['hashes']['/app/dist/src/lib/exchange.js']
+        self.assertNotEqual(self.candidate('v2.11.704').returncode, 0)
+        self.assertEqual(json.loads((self.evidence/'checks.json').read_text())['status'], 'awaiting_transport_review')
+
     def test_new_tag_can_match_any_complete_supported_profile(self):
         spec=importlib.util.spec_from_file_location('supported_guard',GUARD)
         guard=importlib.util.module_from_spec(spec); spec.loader.exec_module(guard)

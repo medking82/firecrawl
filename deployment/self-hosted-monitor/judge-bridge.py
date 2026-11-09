@@ -1,7 +1,7 @@
-"""Private Unix-socket bridge to the actual, text-only native Codex CLI."""
+"""Private Unix-socket bridge to a text-only judge via the local Magpie gateway."""
 import http.server,json,os,socketserver,threading
 from pathlib import Path
-from codex_judge import judge
+from magpie_judge import judge
 
 BUSY=threading.BoundedSemaphore(1)
 

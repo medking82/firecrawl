@@ -18,7 +18,7 @@ SCHEMA = {'type': 'object', 'additionalProperties': False, 'required': ['done'],
 class Fake(http.server.BaseHTTPRequestHandler):
     status, reply, seen = 200, {}, []
 
-    def log_message(self, *args):
+    def log_message(self, format, *args):
         pass
 
     def do_POST(self):
@@ -106,6 +106,27 @@ class MagpieJudge(unittest.TestCase):
             Fake.status, Fake.reply = 200, reply
             with self.assertRaises(error):
                 magpie_judge.judge('s', 'p', timeout=5, schema=SCHEMA)
+
+    def test_monitor_default_contract(self):
+        good = {'meaningful': True, 'confidence': 'high', 'reason': 'r', 'meaningfulChanges': []}
+        Fake.reply = answer(json.dumps(good))
+        result = magpie_judge.judge('s', 'p', timeout=5)
+        self.assertEqual(json.loads(result['text']), good)
+        body = Fake.seen[0][2]
+        self.assertEqual(body['text']['format']['schema'], magpie_judge.MONITOR_SCHEMA)
+        self.assertTrue(body['instructions'].startswith('Judge the supplied monitoring evidence'))
+        Fake.reply = answer(json.dumps({**good, 'confidence': 'sure'}))
+        with self.assertRaises(ValueError):
+            magpie_judge.judge('s', 'p', timeout=5)
+
+    def test_monitor_schema_matches_codex_contract(self):
+        import codex_judge
+        self.assertEqual(magpie_judge.MONITOR_SCHEMA, codex_judge.SCHEMA)
+
+    def test_bridge_uses_magpie(self):
+        source = (Path(__file__).resolve().parent / 'judge-bridge.py').read_text()
+        self.assertIn('from magpie_judge import judge', source)
+        self.assertNotIn('codex_judge', source)
 
     def test_unreachable_gateway(self):
         with patch.object(magpie_judge, 'UPSTREAM', ('127.0.0.1', 9)):

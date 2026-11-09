@@ -126,6 +126,18 @@ TRANSPORT_PROFILES["v2.11.683"] = {
     "dependencies": {"node_major": 22, "undici": "7.30.1", "ipaddr_js": "2.2.0"},
     "undici_lib_sha256": "213bda9bf7c6860b6714484b606b431c7bdbe4652a20be22e3e20e8b96e1187c",
 }
+# Frozen 704 public-fetch audit: deployment/firecrawl-transport-20261109-v704.json.
+# v2.11.705 compiles to the same guarded bytes. Package admission and Owner approval remain separate.
+TRANSPORT_PROFILES["v2.11.704"] = {
+    "receipt_sha256": "ca53972c4546835b96f663a2a8b87f9a1b252d88853b455dd429802593d20bcc",
+    "hashes": {
+        **TRANSPORT_PROFILES["v2.11.683"]["hashes"],
+        "/app/dist/src/scraper/scrapeURL/index.js": "53f75c638e1d88721d25d6b3c52277da11b66809a3c720751fb4b57202632b6e",
+        "/app/dist/src/lib/exchange.js": "8e96b46a2c38a9babec74335112eaeaceaa850576aedf6f60b03541a029ca984",
+    },
+    "dependencies": {"node_major": 22, "undici": "7.30.1", "ipaddr_js": "2.2.0"},
+    "undici_lib_sha256": "213bda9bf7c6860b6714484b606b431c7bdbe4652a20be22e3e20e8b96e1187c",
+}
 EXPECTED_PREDICATES = {
     "ALLOW_LOCAL_WEBHOOKS_true": False,
     "PROXY_SERVER_nonempty": False,

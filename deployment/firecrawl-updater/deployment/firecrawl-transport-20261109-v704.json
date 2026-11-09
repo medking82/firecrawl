@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "profile": "v2.11.704",
+  "scope": "Audited public static-fetch transport only; not whole-image safety or deployment approval",
+  "source_commit": "9965df2b1d4e2bef848feee475b61124cea7902d",
+  "also_covers": {"v2.11.705": "a0535ec3e53abd41b60e6a60aa57d3a3397fc792"},
+  "baseline_source_commit": "7d8e92dc5d270b1247d60e809c3fd32f52e0e47b",
+  "baseline_profile": "v2.11.683",
+  "candidate_api_image": "sha256:e81f1397da8630609dc26890e4e7d625c812eb18ba7c17427d12bec7af3b934a",
+  "baseline_api_image": "sha256:6b5ca9575f5ac8c1591853f2a06b339647f54b90884e10fd0ba5e97eaf0762e8",
+  "prior_guard_sha256": "759233aa70e71d4f88771e6df83276d803d9bbf6a9ba3626d70952ac5743feab",
+  "dependencies": {"node_major": 22, "undici": "7.30.1", "ipaddr_js": "2.2.0"},
+  "undici_lib_sha256": "213bda9bf7c6860b6714484b606b431c7bdbe4652a20be22e3e20e8b96e1187c",
+  "changed_compiled_hashes": {
+    "/app/dist/src/scraper/scrapeURL/index.js": "53f75c638e1d88721d25d6b3c52277da11b66809a3c720751fb4b57202632b6e",
+    "/app/dist/src/lib/exchange.js": "8e96b46a2c38a9babec74335112eaeaceaa850576aedf6f60b03541a029ca984"
+  },
+  "audit": [
+    "The GA401 upgrade owner built v2.11.704 on 2026-11-08 (evidence candidate.vB3iQLzT); admission stopped only on these two compiled files. The other seven guarded compiled files hash identically in the running v2.11.683 image and the candidate.",
+    "exchange.js only adds forwardExchangeToolFeedback, a POST to the Exchange base URL /v1/tool-feedback that returns early unless the Exchange base URL and EXCHANGE_INTERNAL_SECRET are set. GA401 sets no EXCHANGE_* variable; the URL is never caller supplied.",
+    "scrapeURL/index.js only adds a US-only location refusal before buildMetaObject and forwards usOnly to the threat check. isUsOnly is teamFlags.usOnly === true, team flags need DB authentication, and USE_DB_AUTHENTICATION is false (enforced by the guard predicates).",
+    "controllers/v2/types.ts changes are type-only (retry_after_seconds, alexandriaToolFusion, deprecationExtensions) and compile to the same types.js bytes.",
+    "Outside the guarded files, 683..705 adds no lockfile or package.json change; robots-txt, crawler, sitemap and hangar only thread the usOnly flag. The one new outbound fetch in non-test source is the Exchange feedback call above.",
+    "v2.11.705 differs from v2.11.704 only in .env.example, config.ts and a test: VERCEL_MARKETPLACE_INTEGRATION_ID gains a default, and auth.ts accepts Vercel OIDC tokens only when USE_DB_AUTHENTICATION === true. No guarded file changes, so the same profile covers v2.11.705.",
+    "No private-address, redirect, connect-time address, download-limit, proxy or TLS safeguard changes. Package admission, live smoke and the Owner's cutover approval remain separate gates."
+  ],
+  "validation": [
+    "Disposable --network none containers of both images hashed the nine guarded files; the two changed files were extracted and diffed. Every compiled hunk corresponds to the 7d8e92dc..9965df2b TypeScript diff of the same file."
+  ]
+}
