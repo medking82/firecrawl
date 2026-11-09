@@ -24,14 +24,15 @@ It does not switch the existing Firecrawl deployment to DB authentication.
 - Local artifacts are private, atomically written JSON files in a Docker
   volume. This opt-in backend also suppresses the separate Cloud Bigtable
   change-tracking index write. The native monitor's own baseline stays intact.
-- Goal judging uses a private Unix socket to GA401's actual native **Codex CLI**.
-  It inherits the selected native model, reasoning effort and Fast/service tier
-  (verified `gpt-6.1-sol` / `max`), with existing ChatGPT subscription auth.
-  The per-call text-only model catalog disables shell, apply-patch and other
-  tools; hooks, plugins, MCP, skills and search are disabled. User configuration
-  and the cached model catalog are not modified. No paid API key or local GPU
-  model is added. There is no automatic Claude/provider fallback. One judge runs
-  at a time; failures keep the native low-confidence fallback visible.
+- Goal judging uses a private Unix socket to GA401's **Magpie gateway**, via
+  `magpie_judge.py`. It calls the Responses API with a strict JSON schema and
+  no tools, using `gpt-6.1-terra` / `medium` by default. The gateway uses existing
+  subscription authentication. Its bearer token is read from the local Magpie
+  credential file; it is never embedded in this repository or the systemd unit.
+  `FIRECRAWL_MAGPIE_MODEL`, `FIRECRAWL_MAGPIE_EFFORT`, `MAGPIE_BASE_URL` and
+  `MAGPIE_TOKEN_FILE` can override the defaults. One judge runs at a time;
+  failures keep the native low-confidence fallback visible. The legacy
+  `codex_judge.py` remains for rollback and contract comparison.
 - No Cloud Firecrawl fallback, paid API provider or GPU model is configured.
 
 ## Install And Validate
@@ -61,7 +62,7 @@ pwsh -File scripts/install-firecrawl-tunnel.ps1 -Execute -LocalPort 13006 -Remot
 
 Run `python3 -B deployment/self-hosted-monitor/smoke.py` on GA401. It tests real
 HTTP authentication, schema rejection, tenant isolation, create/run/results,
-new/same/changed detection, persisted diffs, Codex CLI judgment, pause/resume,
+new/same/changed detection, persisted diffs, Magpie judgment, pause/resume,
 scheduled execution, delete and 404. Its public fixture uses a stable HTTP Range
 endpoint with a controlled Range header change; it does not edit an external
 website. It also ages its own real check history, runs the retention service,

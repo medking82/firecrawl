@@ -93,8 +93,8 @@ psql(f"INSERT INTO public.self_hosted_team_policy(team_id,flags) VALUES ('{team}
 socket_dir=STATE/'judge'; socket_dir.mkdir(exist_ok=True,mode=0o700)
 unit=Path('/home/marck/.config/systemd/user/firecrawl-monitor-judge.service')
 unit.write_text(f'''[Unit]
-Description=Firecrawl Monitor Private CLI Judge
-After=opencodex-proxy.service
+Description=Firecrawl Monitor Private Magpie Judge
+# Magpie is managed by the system manager, outside this user unit's ordering.
 [Service]
 Type=simple
 ExecStart=/usr/bin/python3 -B {HERE}/judge-bridge.py
