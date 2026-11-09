@@ -1,2 +1,8 @@
 #!/bin/sh
-exec "$(dirname -- "$0")/check-lf"
+set -eu
+"$(dirname -- "$0")/check-lf"
+export FIRECRAWL_LF_CHECKED=1
+# Preserve API quality checks when dependencies are installed in this clone.
+if [ -d apps/api/node_modules ] && [ -f apps/api/.husky/pre-commit ]; then
+  exec sh apps/api/.husky/pre-commit
+fi

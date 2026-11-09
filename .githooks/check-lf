@@ -3,8 +3,16 @@ set -eu
 policy_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
-    # Git for Windows; qualify Python execution in the installed WSL distro.
-    exec wsl.exe -d Ubuntu-26.04 --cd "$(pwd -W)" --exec python3 .github/scripts/check-line-endings.py
+    # Explicit paths also support Windows-created linked worktrees, whose
+    # .git pointer contains a Windows path that Linux Git cannot interpret.
+    export GIT_DIR="$(git rev-parse --absolute-git-dir)"
+    export GIT_COMMON_DIR="$(cygpath -aw "$(git rev-parse --git-common-dir)")"
+    export GIT_WORK_TREE="$(pwd -W)"
+    if [ -n "${GIT_INDEX_FILE:-}" ]; then
+      export GIT_INDEX_FILE="$(cygpath -aw "$GIT_INDEX_FILE")"
+    fi
+    export WSLENV="${WSLENV:+$WSLENV:}GIT_DIR/p:GIT_COMMON_DIR/p:GIT_WORK_TREE/p:GIT_INDEX_FILE/p"
+    exec wsl.exe -d "${FIRECRAWL_WSL_DISTRO:-Ubuntu-26.04}" --cd "$(pwd -W)" --exec python3 .github/scripts/check-line-endings.py "$@"
     ;;
-  *) exec python3 "$policy_root/.github/scripts/check-line-endings.py" ;;
+  *) exec python3 "$policy_root/.github/scripts/check-line-endings.py" "$@" ;;
 esac

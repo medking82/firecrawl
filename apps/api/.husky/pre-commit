@@ -1,1 +1,10 @@
-cd apps/api && pnpm knip --cache && pnpm lint-staged
+#!/bin/sh
+set -eu
+if [ -z "${FIRECRAWL_LF_CHECKED:-}" ]; then
+  .githooks/check-lf
+fi
+if [ -d apps/api/node_modules ]; then
+  cd apps/api
+  pnpm knip --cache
+  pnpm lint-staged
+fi

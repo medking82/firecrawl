@@ -1,2 +1,2 @@
 #!/bin/sh
-exec "$(dirname -- "$0")/check-lf"
+exec "$(dirname -- "$0")/check-lf" --pre-push

@@ -1,0 +1,3 @@
+#!/bin/sh
+# Husky prepare may change core.hooksPath; retain the same outgoing check.
+exec .githooks/pre-push "$@"

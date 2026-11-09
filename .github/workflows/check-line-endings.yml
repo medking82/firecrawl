@@ -10,10 +10,17 @@ permissions:
 
 jobs:
   check:
+    name: LF policy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - name: Reject CRLF and mixed text in Git
-        run: python3 .github/scripts/check-line-endings.py
-      - name: LF policy regressions (hooks, checkout, clone)
+        with:
+          fetch-depth: 0
+      - name: Reject CRLF and mixed text in index and checkout
+        run: python3 -B .github/scripts/check-line-endings.py
+      - name: Check every policy-era tree reachable from this push or PR
+        # Check the complete policy-era ancestry, including every PR parent,
+        # rather than only event.before..after or a synthetic merge tip.
+        run: python3 -B .github/scripts/check-line-endings.py --commits HEAD
+      - name: LF policy regressions (history, hooks, Husky, checkout, clone)
         run: python3 -B .github/scripts/test_line_endings.py -v
