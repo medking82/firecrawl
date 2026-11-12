@@ -180,11 +180,13 @@ record() { printf '%s\n' "$*" >> "$state_dir/calls"; }
 set_restart_policy() { record policy; }
 validate_config() { record config; }
 sync_fork_main() { record fork-sync; }
+# Release discovery has its own real-Git integration tests.
+select_latest_stable_tag() { printf 'v2.11.999\n'; }
 git() {
   case "$1 $2" in
     'status --porcelain') ;;
-    'fetch --prune'|'fetch --tags'|'merge-base --is-ancestor') ;;
-    'tag --list') printf 'v2.11.999\n' ;;
+    'fetch --no-tags') [[ "$3" == upstream && "$4" == refs/tags/v2.11.999:refs/tags/v2.11.999 ]] ;;
+    'merge-base --is-ancestor') ;;
     'rev-list -n') printf '%040d\n' 2 ;;
     'rev-parse HEAD') if [[ "$scenario" == current ]]; then printf '%040d\n' 2; else printf '%040d\n' 1; fi ;;
     'describe --tags') printf 'v2.11.518\n' ;;

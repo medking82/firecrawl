@@ -6,7 +6,6 @@ set -Eeuo pipefail
 umask 077
 
 repo=${FIRECRAWL_REPO:-/home/marck/github/firecrawl}
-series=${FIRECRAWL_UPDATE_SERIES:-v2.11}
 canonical_state_dir=/home/marck/.local/state/firecrawl-updater
 state_dir=${FIRECRAWL_UPDATE_STATE_DIR:-$canonical_state_dir}
 guard_sha256=54642381002c46902d62a0b7185bbe4439fd0fafba11f60c94161179aa9d049b
@@ -29,6 +28,30 @@ phase=""
 retired_agents=0
 
 log() { printf '%s %s\n' "$(date --iso-8601=seconds)" "$*"; }
+
+# Discover stable releases from upstream only, across all major/minor series.
+select_latest_stable_tag() {
+  python3 -B - <<'PYTAG'
+import re
+import subprocess
+
+try:
+    output = subprocess.check_output(
+        ['git', 'ls-remote', '--tags', '--refs', 'upstream'], text=True)
+except (OSError, subprocess.CalledProcessError):
+    raise SystemExit('Unable to discover upstream release tags') from None
+pattern = re.compile(r'refs/tags/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)')
+releases = []
+for line in output.splitlines():
+    fields = line.split()
+    match = pattern.fullmatch(fields[1]) if len(fields) == 2 else None
+    if match:
+        releases.append((tuple(map(int, match.groups())), fields[1].removeprefix('refs/tags/')))
+if not releases:
+    raise SystemExit('No stable upstream release tag found')
+print(max(releases)[1])
+PYTAG
+}
 
 # Require the GitHub Actions LF job for the published commit, never another tip.
 wait_for_sync_lf_check() {
@@ -1315,9 +1338,8 @@ PYCHECKLOCK
   set_restart_policy
   log "syncing medking82/firecrawl from firecrawl/firecrawl"
   sync_fork_main
-  git fetch --tags upstream
-  latest_tag=$(git tag --list "${series}.*" --sort=-version:refname | sed -n '1p')
-  [[ -n "$latest_tag" ]] || { log "no release tag found for ${series}.x"; return 1; }
+  latest_tag=$(select_latest_stable_tag)
+  git fetch --no-tags upstream "refs/tags/$latest_tag:refs/tags/$latest_tag"
   latest_commit=$(git rev-list -n 1 "$latest_tag")
   git merge-base --is-ancestor "$latest_commit" origin/main
   previous_commit=$(git rev-parse HEAD)

@@ -22,7 +22,10 @@ owners and require their own compatibility review and deployment.
 The Owner decided on 2026-10-31 that candidates are built automatically and cut
 over only after the Owner approves that exact tag.
 
-1. A scheduled run selects the newest `v2.11.*` tag, prepares and admits its
+1. A scheduled run selects the highest stable `vMAJOR.MINOR.PATCH` tag directly
+   from upstream, across all major and minor versions. Prerelease tags and local
+   or fork-only tags are excluded; the former series setting is no longer used.
+   The run prepares and admits its
    candidate under `run.lock` and a shared `update.lock`, then writes
    `candidate-ready.json` (tag, commit, image IDs, checks hash, evidence path) and
    stops. It never takes the exclusive lock or switches source.
@@ -74,8 +77,11 @@ all new vulnerabilities. Reassess advisories and patch inputs for new incidents.
 The current inputs cover [CVE-2026-118664](https://github.com/advisories/GHSA-qr28-fpjm-wq7f)
 and [CVE-2026-116576](https://github.com/advisories/GHSA-3f7j-7jwc-fxfj).
 
-On GA401, run the isolated tests from this directory with
-`python3 -B -m unittest deployment.test_firecrawl_approval deployment.test_firecrawl_candidate deployment.test_firecrawl_patch deployment.test_research_update deployment.test_fork_sync`
-and check shell syntax with `bash -n deployment/firecrawl_update.sh`. After an
-installation, `firecrawl-upgrade --check-only` exercises the installed guard plus
-real search and scrape without initiating an update.
+Run the isolated tests in PC WSL from this directory:
+`python3 -B -m unittest deployment.test_firecrawl_approval deployment.test_firecrawl_candidate deployment.test_firecrawl_patch deployment.test_research_update deployment.test_fork_sync deployment.test_release_selection`
+and check shell syntax with `bash -n deployment/firecrawl_update.sh`. From the
+repository root, with the API's TypeScript dependency on Node's module path, run
+`NODE_PATH="$PWD/apps/api/node_modules" node --test deployment/self-hosted-monitor/judge.test.cjs`
+for local-socket and cloud-boundary judge regressions. After installation on
+GA401, `firecrawl-upgrade --check-only` exercises the installed guard plus real
+search and scrape without initiating an update.
