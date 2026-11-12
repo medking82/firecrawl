@@ -1,0 +1,90 @@
+{
+  "schema": 2,
+  "profile": "v2.11.735",
+  "scope": "Audited public static-fetch and hosted virtual-shell boundaries; not whole-image safety or deployment approval",
+  "source_commit": "793fd57f133b71426bb6ce65641428c28b883e36",
+  "baseline_profile": "v2.11.704",
+  "candidate_api_image": "sha256:348bf6de410d18b5b06ac324ab0f5267b2e5828ffa9f6810627e2da7e7a033ba",
+  "export_archive_sha256": "4e086cb0b6d091b559b17c71a981399475df3f2872707de3c632cd310852539a",
+  "dependencies": {
+    "node_major": 22,
+    "undici": "7.30.1",
+    "ipaddr_js": "2.2.0"
+  },
+  "undici_lib_sha256": "213bda9bf7c6860b6714484b606b431c7bdbe4652a20be22e3e20e8b96e1187c",
+  "just_bash_tree_sha256": "ff1f7ad0597080c3a3bb3cf5a752db4527de621a12dcee0f4faa0e6500b7aa9b",
+  "just_bash_version": "3.6.0",
+  "hashes": {
+    "/app/dist/src/scraper/scrapeURL/engines/index.js": "ff98b31019085de4a21ec2b3b8a4bed788db9de1a790f877d08b4a9d97e22774",
+    "/app/dist/src/scraper/scrapeURL/engines/utils/safeFetch.js": "25944a8f4bcb2986ca9a548df0d8d0fa1476b7c7745465b63f4b599b3baeeb5c",
+    "/app/dist/src/scraper/scrapeURL/engines/utils/downloadFile.js": "8ac395b87365de206b5a585f41be070c3b5cb9fa5f403c6613d19e5bc119e746",
+    "/app/dist/src/scraper/scrapeURL/engines/fetch/index.js": "6500fe7f20d148650a42d11f0b85554b6581016f3c386b71d36f4f3a27a8fd2a",
+    "/app/dist/src/scraper/scrapeURL/engines/pdf/index.js": "6a08e5c949292c9c65793baf15bbc60216764f37ab456f919e528f311338d76b",
+    "/app/dist/src/scraper/scrapeURL/engines/document/index.js": "9ee8d7745dbc40ae9715338feecb15adc3bff488818b667929ace8350059bc62",
+    "/app/dist/src/scraper/scrapeURL/index.js": "8904a5826c4b494ef407657063f8271821efc2887b764521a178e52419a36dfb",
+    "/app/dist/src/controllers/v2/types.js": "28d504d246bfbf849f48649b18c325019ce1650a3d066a5dd64a2b2a245ac2d7",
+    "/app/dist/src/lib/exchange.js": "28ba3c79d6390ca68f556cac3e54353b20ced0a8556725e7ae406eb4ab354ac7",
+    "undici/client.js": "84205dc96cb9bf7432c4b3e80f0babaa11d6f4faf24ead3e7d9660e9d8fee0b3",
+    "ipaddr.js": "75c602c8834cc9e1bcdb7d1d2eaadbbd5ba0e19660d9ea3f450dbf17f2ec8495"
+  },
+  "additional_hashes": {
+    "/app/dist/src/config.js": "17cc8c8a1e3ed31b983b6d0511ad3f3ecb3e86e1636307ca3e0dc46e541cad4f",
+    "/app/dist/src/index.js": "563c8f2c654a03284e8f12841ef3144bc7b6ab87df37c1d6cffc1267eb8c7351",
+    "/app/dist/src/controllers/v2/bash.js": "09d4c15296b46a12d5bba281a4ce314835e2a8f9b2c6d495bf2a01b2d58ecdaf",
+    "/app/dist/src/lib/reserved-capacity.js": "6cc9b694a4302400ea56d3d68df7657e8c46d37e85f5bcc2edd018432781213f",
+    "/app/dist/src/lib/x-twitter-url.js": "b67feff4d184702fc21a78150368b072ae741f1cc76d70ec7b49232d93f5a9a6",
+    "/app/dist/src/lib/hosted-bash/docs.js": "49550a7a8594c684e746833c1958d141107609596cbbbfef316fa0750cc3b504",
+    "/app/dist/src/lib/hosted-bash/firecrawl-command.js": "daa1b0978412795378644552221a3e9fa6eb8078939da16726405cdf5eeb2459",
+    "/app/dist/src/lib/hosted-bash/shell-worker.js": "34dbeed318ccf2e3ff45825cbc783168b3b026bef17eb748895f7495703a2754",
+    "/app/dist/src/lib/hosted-bash/shell.js": "2e80f104b4b358db690552f65c2fa960163de11724e8d5a3ed93d2295df994b6",
+    "/app/dist/src/lib/hosted-bash/limits.js": "2ffed642f7165dbc6eca05fefe4ce477d495595bb565b8396c392de451aa7c5d",
+    "/app/dist/src/scraper/scrapeURL/error.js": "ec32e49ffa8e5517697a0914a7f4bca80c3a9b7dbed24714c48be18d341882e1"
+  },
+  "syntax_hashes": {
+    "/app/dist/src/scraper/scrapeURL/engines/index.js": "6ea558b99c4aa8c750cd36b184f43be7e912c929a0d1d7446e46d1d05b68ebb1",
+    "/app/dist/src/scraper/scrapeURL/engines/utils/safeFetch.js": "e0fe001c4f52e47f7a6551095e17726a4cce94f4cb093e35d878b239b66a4033",
+    "/app/dist/src/scraper/scrapeURL/engines/utils/downloadFile.js": "df4757bb63aa7c2bcf50a3485ed2a45bb55b4894c352e6c562347de46457248b",
+    "/app/dist/src/scraper/scrapeURL/engines/fetch/index.js": "c56db8903bb161e6b2950971168618d57ebe653760836558457b6da828bb19eb",
+    "/app/dist/src/scraper/scrapeURL/engines/pdf/index.js": "c91e5fe4712f33c3cb741d405ae10f53118eab63bd8078c44c6c87d18485667f",
+    "/app/dist/src/scraper/scrapeURL/engines/document/index.js": "86e17f11fff187fec395e52d659bc506c3dd67bed76847f6adeb3cbf08c42e19",
+    "/app/dist/src/scraper/scrapeURL/index.js": "36e6c60ab39e8bbe454f584d9d63aa2ba3e5f45cd6a998c0accb306b70efdde4",
+    "/app/dist/src/controllers/v2/types.js": "428add5a75053ae6680371111a939a7345f25890803f1bb331533813abc031f9",
+    "/app/dist/src/lib/exchange.js": "43cf8cf01beb14ec73395ec5f61ae4cdcfc702c2ce77369cea2857635d771dd5",
+    "undici/client.js": "7e7cb53c1ef1483358468fbe91463a836b5b6e5fe2e791fc509417735d602646",
+    "ipaddr.js": "c654870b883b9d766ecc880a28899f19a5a68f1b4e9c6ee8777fe62c62222af0",
+    "/app/dist/src/config.js": "da0aed61708934427d7202e642c75d20adbabaecbcd1978d12a02d5a5086659b",
+    "/app/dist/src/index.js": "76a56926c8d7c4b41b556b6b9195484a19b2babbd1bdc406cbd75b157825fa46",
+    "/app/dist/src/controllers/v2/bash.js": "beb619eeddd3a12997a3ffa3e45195cc19be8af8cd9e6c8ef0ab408821c27920",
+    "/app/dist/src/lib/reserved-capacity.js": "7b95c4334e83e2a1d2a92c6f4fdbecaabf2e122400d2998167965c7d677337e8",
+    "/app/dist/src/lib/x-twitter-url.js": "c6ff2d615bfa1bc5d643fa555cfb836ef07ee3ec2734ec0768ac8bd83b8be212",
+    "/app/dist/src/lib/hosted-bash/docs.js": "25d1d63a1edd695d68f6e7c4b0b58f29e6a3521da380012e993c698a178164eb",
+    "/app/dist/src/lib/hosted-bash/firecrawl-command.js": "9baf6787e09e83eb6ff6dd7297622c6c8f67c7abd9aee9c9e6430ee2924b0d90",
+    "/app/dist/src/lib/hosted-bash/shell-worker.js": "31d44512c9ef6f54f0c25515021c7c042268557c20a0e53f72eb510c9d76e869",
+    "/app/dist/src/lib/hosted-bash/shell.js": "571bd0790c3cc4488a4bc9d38ec66b27fa622992789e72a4cac0de59f98dbd64",
+    "/app/dist/src/lib/hosted-bash/limits.js": "cea83ff6969ea4a86d66485acec48b468aa154cc317d42c340667fe03c82156a",
+    "/app/dist/src/scraper/scrapeURL/error.js": "efe18bc09ad6ef98015dd2c78e48c7892a433e306204f84867ecc51a57a31eb7"
+  },
+  "audit": [
+    "safeFetch, downloadFile, fetch and document guarded bytes remain identical to v2.11.704/705. Undici and ipaddr versions and the complete Undici lib tree remain identical.",
+    "Changed engine selection routes X/Twitter pages exclusively through Exchange and fails closed when unavailable. The Exchange URL remains unset by the required configuration predicate; caller URLs do not select an alternate transport.",
+    "PDF changes add reserved-capacity processing restrictions and errors, rather than a new direct transport. Both US-only and reserved-capacity failures avoid fallback.",
+    "Exchange eligibility and feedback response logging changed; the Exchange configured URL and secret still gate these calls. types.js changes add error/schema definitions.",
+    "Hosted /v2/bash is enabled by default. It executes a just-bash virtual filesystem in a separate bounded process, with an empty OS environment, four concurrent shells, a deadline, RSS watchdog and command allowlist. It does not invoke an OS bash shell.",
+    "The built-in Firecrawl command calls this API using the socket local address and port, not the caller Host header. Only fixed search/scrape routes are called, preserving their validation. Inline API-key flags are refused.",
+    "Docs requests use the fixed docs.firecrawl.dev origin and matching index links; they use normal fetch, including its redirect handling. This audit does not claim arbitrary docs-origin compromise protection.",
+    "Syntax fingerprints cover all 11 original files and 11 additional entry/config/helper files. Comments and positions are ignored; executable AST changes, ASI, directives, regexp flags and tagged template raw strings remain significant.",
+    "The full just-bash runtime dependency graph is pinned from the actual shell-worker resolution context: 74 packages and 3529 files, including external sprintf-js, optional-dependency absence and lazy-loaded commands. The independently exported closure SHA256 and graph digest matched in PC WSL. New package content requires qualification. This record is an audited baseline, not a release-version selection restriction.",
+    "The fork local monitor judge source and socket adapter remain on fork main; the currently deployed core image has no local judge adapter or configured judge socket. The separate monitor service remains an independent deployment."
+  ],
+  "validation": [
+    "PC WSL Node 22.22.1 parsed the actual candidate compiled files; export SHA256 matched the GA401 read-only export.",
+    "Eleven syntax admission/parser regressions passed in PC WSL, including ASI, directives, regexp flags, tagged templates, nonfinite numeric values, legacy-profile shell bypass rejection, external transitive package mutation, worker-local resolution, dependency/config mismatch and complete extra-helper coverage.",
+    "Eight hosted-shell tests passed in PC WSL against the actual compiled worker and just-bash 3.6.0: text pipeline, host-file isolation, parent environment isolation, network/runtime tool exclusion, fresh filesystem, credential-flag rejection, cancellation and bounded output."
+  ],
+  "dependency_tree_counts": {
+    "undici_lib": 116,
+    "just_bash": 3529,
+    "just_bash_packages": 74,
+    "closure_export_archive_sha256": "9a3647df5c8b5606f4ac4e464d08b1dc246a9abd356640d3def5501154b8dba8"
+  }
+}

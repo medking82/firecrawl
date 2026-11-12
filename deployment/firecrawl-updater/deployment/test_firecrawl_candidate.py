@@ -36,11 +36,13 @@ class CandidateTests(unittest.TestCase):
         spec = importlib.util.spec_from_file_location('oracle_guard', GUARD)
         module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
         profile = module.TRANSPORT_PROFILES['v2.11.473']
+        self.syntax = {'syntax_hashes': {}}
+        self.sandbox_tree = {'just_bash_tree_sha256': '0' * 64, 'file_count': 977}
         self.tree = {'undici_lib_sha256': module.TRANSPORT_PROFILES['v2.11.621']['undici_lib_sha256'], 'file_count': 116}
         self.probe = {'hashes':copy.deepcopy(profile['hashes']), 'dependencies':copy.deepcopy(profile['dependencies']),
             'predicates':dict(module.EXPECTED_PREDICATES), 'safeguards':dict.fromkeys(
                 ['private_bypass_absent_or_empty','db_auth_canonical_false','dotenv_absent',
-                 'alternate_dotenv_unconfigured','expected_working_directory','node_options_unconfigured'], True)}
+                 'alternate_dotenv_unconfigured','expected_working_directory','node_options_unconfigured'], True), 'hosted_bash_present': False}
         self.config = {'name':'firecrawl','services':{'api':{'build':{'context':'candidate'},
             'environment':{'USE_DB_AUTHENTICATION':'false','PLAYWRIGHT_MICROSERVICE_URL':'http://fixture'}},
             'nuq-postgres':{}, 'playwright-service':{}}}
@@ -67,7 +69,12 @@ elif args[:2]==['inspect','--format'] and args[-1] in ('firecrawl-nuq-postgres-1
 elif args[:2]==['run','--rm']: print(json.dumps(data['packages']))
 elif args[:2]==['run','-d']: print('b'*64)
 elif args[0]=='inspect': print(json.dumps({'id':'b'*64,'image':'sha256:'+'a'*64,'running':True}))
-elif args[0]=='exec': print(json.dumps(data['tree'] if 'undici_lib_sha256' in args[-1] else data['probe']))
+elif args[0]=='exec':
+ if 'syntax_hashes' in args[-1]: value=data['syntax']
+ elif 'just_bash_tree_sha256' in args[-1]: value=data['sandbox_tree']
+ elif 'undici_lib_sha256' in args[-1]: value=data['tree']
+ else: value=data['probe']
+ print(json.dumps(value))
 elif args[:2]==['rm','-f']: pass
 else: raise SystemExit('unexpected Docker action')
 ''')
@@ -75,7 +82,8 @@ else: raise SystemExit('unexpected Docker action')
         self.env = dict(os.environ, PATH=str(self.root)+os.pathsep+os.environ['PATH'], CANDIDATE_FIXTURE=str(self.fixture))
 
     def write_fixture(self):
-        self.fixture.write_text(json.dumps({'config':self.config,'probe':self.probe,'tree':self.tree,'metadata':self.metadata,'packages':self.packages}))
+        self.fixture.write_text(json.dumps({'config':self.config,'probe':self.probe,'tree':self.tree,'metadata':self.metadata,'packages':self.packages,
+            'syntax':self.syntax,'sandbox_tree':self.sandbox_tree}))
 
     def candidate(self, tag='v2.11.473'):
         self.write_fixture()
@@ -197,9 +205,41 @@ else: raise SystemExit('unexpected Docker action')
             with self.subTest(profile=name):
                 self.probe['hashes']=copy.deepcopy(profile['hashes'])
                 self.probe['dependencies']=copy.deepcopy(profile['dependencies'])
+                self.syntax = {'syntax_hashes': copy.deepcopy(profile.get('syntax_hashes', {}))}
+                self.sandbox_tree['just_bash_tree_sha256'] = profile.get('just_bash_tree_sha256', '0' * 64)
                 result=self.candidate('v2.11.999'); self.assertEqual(result.returncode,0,result.stderr)
                 report=json.loads((self.evidence/'checks.json').read_text())
                 self.assertEqual(report['review_basis']['profile'],name)
+
+    def test_735_receipt_syntax_fallback_and_sandbox_tree(self):
+        spec = importlib.util.spec_from_file_location('profile_guard_735', GUARD)
+        assert spec is not None and spec.loader is not None
+        guard = importlib.util.module_from_spec(spec); spec.loader.exec_module(guard)
+        profile = guard.TRANSPORT_PROFILES['v2.11.735']
+        receipt_path = ROOT / 'deployment/firecrawl-transport-20261113-v735.json'
+        receipt = json.loads(receipt_path.read_text())
+        self.assertEqual(hashlib.sha256(receipt_path.read_bytes()).hexdigest(), profile['receipt_sha256'])
+        for key in ('hashes', 'syntax_hashes', 'dependencies', 'undici_lib_sha256', 'just_bash_tree_sha256'):
+            self.assertEqual(receipt[key], profile[key])
+        self.assertEqual(len(profile['syntax_hashes']), 22)
+        self.probe['hosted_bash_present'] = True
+        self.probe['hashes'] = copy.deepcopy(profile['hashes'])
+        self.probe['dependencies'] = copy.deepcopy(profile['dependencies'])
+        self.syntax = {'syntax_hashes': copy.deepcopy(profile['syntax_hashes'])}
+        self.sandbox_tree['just_bash_tree_sha256'] = profile['just_bash_tree_sha256']
+        self.assertEqual(self.candidate('v2.11.735').returncode, 0)
+        self.assertEqual(self.manifest().returncode, 0)
+        (self.evidence / 'manifest.json').unlink()  # A second candidate has fresh evidence in production.
+        self.probe['hashes'][next(iter(profile['hashes']))] = '0' * 64
+        self.assertEqual(self.candidate('v2.11.999').returncode, 0)
+        report = json.loads((self.evidence / 'checks.json').read_text())
+        self.assertEqual(report['transport_check']['fingerprint_match'], 'syntax')
+        self.assertEqual(self.manifest().returncode, 0)
+        self.sandbox_tree['just_bash_tree_sha256'] = 'f' * 64
+        self.assertNotEqual(self.candidate('v2.11.999').returncode, 0)
+        report = json.loads((self.evidence / 'checks.json').read_text())
+        self.assertEqual(report['transport_check']['error'], 'dependency_tree_mismatch')
+        self.assertNotEqual(self.manifest().returncode, 0)
 
     def test_621_undici_tree_drift_never_publishes_manifest(self):
         spec=importlib.util.spec_from_file_location('tree_guard',GUARD)

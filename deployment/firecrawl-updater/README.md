@@ -13,8 +13,18 @@ The installer keeps a private preimage and coordinates with the updater lock.
 
 Each new upstream candidate is built from its source commit in an isolated
 worktree, patched using integrity-checked package inputs, and audited before
-cutover. The transport guard accepts only complete previously reviewed profiles;
-unknown transport changes stop for review. The updater verifies that all exact
+cutover. The transport guard accepts complete audited profiles by exact bytes
+or an equivalent parsed JavaScript AST. Comments, formatting and source positions
+do not block a compatible upgrade; executable logic, ASI, directive, regexp and
+tagged-template changes still require qualification. The latest profile also
+binds the hosted-shell entry points and just-bash's resolved runtime dependency
+graph, including external packages. A candidate containing a hosted shell cannot
+reuse a legacy profile that lacks that boundary.
+Dependency versions, Undici's full library tree and runtime configuration remain
+required. New transport logic earns a new checked-in audit record after review
+and PC WSL verification, then the system task deploys without a human approval
+step. A changed installed guard invalidates an older blocked-candidate key, so
+it is retried automatically. The updater verifies that all exact
 rollback images exist and preserves the running PostgreSQL and Playwright images.
 The timer updates the core API only; monitor and browser overlays have separate
 owners and require their own compatibility review and deployment.
@@ -101,7 +111,7 @@ The current inputs cover [CVE-2026-118664](https://github.com/advisories/GHSA-qr
 and [CVE-2026-116576](https://github.com/advisories/GHSA-3f7j-7jwc-fxfj).
 
 Run the isolated tests in PC WSL from this directory:
-`python3 -B -m unittest deployment.test_firecrawl_approval deployment.test_firecrawl_candidate deployment.test_firecrawl_patch deployment.test_research_update deployment.test_fork_sync deployment.test_release_selection`
+`python3 -B -m unittest deployment.test_transport_syntax deployment.test_firecrawl_approval deployment.test_firecrawl_candidate deployment.test_firecrawl_patch deployment.test_research_update deployment.test_fork_sync deployment.test_release_selection`
 and check shell syntax with `bash -n deployment/firecrawl_update.sh`. From the
 repository root, with the API's TypeScript dependency on Node's module path, run
 `NODE_PATH="$PWD/apps/api/node_modules" node --test deployment/self-hosted-monitor/judge.test.cjs`
