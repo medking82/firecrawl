@@ -140,7 +140,7 @@ TRANSPORT_PROFILES["v2.11.704"] = {
 }
 # Frozen audit: deployment/firecrawl-transport-20261113-v735.json.
 # Complete syntax program and dependency trees; future stable tags may reuse it.
-TRANSPORT_PROFILES["v2.11.735"] = {'receipt_sha256': '1356f8cc01f340d86d15e62770d764cb0583e845f614291a5163b96d2b2d27ba',
+TRANSPORT_PROFILES["v2.11.735"] = {'receipt_sha256': '8c9d3c2213fc2a2057de92defba90658e670a7871f297757e04fe0ff4c064c18',
  'hashes': {'/app/dist/src/scraper/scrapeURL/engines/index.js': 'ff98b31019085de4a21ec2b3b8a4bed788db9de1a790f877d08b4a9d97e22774',
             '/app/dist/src/scraper/scrapeURL/engines/utils/safeFetch.js': '25944a8f4bcb2986ca9a548df0d8d0fa1476b7c7745465b63f4b599b3baeeb5c',
             '/app/dist/src/scraper/scrapeURL/engines/utils/downloadFile.js': '8ac395b87365de206b5a585f41be070c3b5cb9fa5f403c6613d19e5bc119e746',
@@ -154,7 +154,7 @@ TRANSPORT_PROFILES["v2.11.735"] = {'receipt_sha256': '1356f8cc01f340d86d15e62770
             'ipaddr.js': '75c602c8834cc9e1bcdb7d1d2eaadbbd5ba0e19660d9ea3f450dbf17f2ec8495'},
  'dependencies': {'node_major': 22, 'undici': '7.30.1', 'ipaddr_js': '2.2.0'},
  'undici_lib_sha256': '213bda9bf7c6860b6714484b606b431c7bdbe4652a20be22e3e20e8b96e1187c',
- 'just_bash_tree_sha256': 'ff1f7ad0597080c3a3bb3cf5a752db4527de621a12dcee0f4faa0e6500b7aa9b',
+ 'just_bash_tree_sha256': '00292c7b08c74e6aa6a401d935dabc9f0afb0bf46b1d4d72e7335a475c2bf70f',
  'syntax_hashes': {'/app/dist/src/scraper/scrapeURL/engines/index.js': '6ea558b99c4aa8c750cd36b184f43be7e912c929a0d1d7446e46d1d05b68ebb1',
                    '/app/dist/src/scraper/scrapeURL/engines/utils/safeFetch.js': 'e0fe001c4f52e47f7a6551095e17726a4cce94f4cb093e35d878b239b66a4033',
                    '/app/dist/src/scraper/scrapeURL/engines/utils/downloadFile.js': 'df4757bb63aa7c2bcf50a3485ed2a45bb55b4894c352e6c562347de46457248b',
@@ -384,7 +384,7 @@ const worker = '/app/dist/src/lib/hosted-bash/shell-worker.js';
 try {
   const nodes = [], seen = new Map(); let count = 0, total = 0;
   function locate(load, name) {
-    for (const base of load.resolve.paths(name) || []) {
+    for (const base of load.resolve.paths(name + '/') || []) {
       const manifest = path.join(base, name, 'package.json');
       if (fs.existsSync(manifest)) {
         const root = fs.realpathSync(path.dirname(manifest));
@@ -403,7 +403,18 @@ try {
     nodes.push(node);
     function walk(dir) {
       for (const name of fs.readdirSync(dir).sort()) {
-        if (name === 'node_modules') continue; // Resolved and bound as graph edges below.
+        if (name === 'node_modules') {
+          if (dir !== pkg.root) throw new Error('Nested dependency shadow');
+          const declared = new Set([...Object.keys(pkg.info.dependencies || {}),
+            ...Object.keys(pkg.info.optionalDependencies || {}), ...Object.keys(pkg.info.peerDependencies || {})]);
+          const modules = path.join(dir, name);
+          for (const item of fs.readdirSync(modules)) {
+            if (item === '.bin') continue;
+            const names = item.startsWith('@') ? fs.readdirSync(path.join(modules, item)).map(n => item + '/' + n) : [item];
+            if (names.some(n => !declared.has(n))) throw new Error('Undeclared package');
+          }
+          continue; // Declared packages are resolved and bound as graph edges below.
+        }
         const full = path.join(dir, name), stat = fs.lstatSync(full);
         if (stat.isSymbolicLink()) throw new Error('Linked package content');
         if (stat.isDirectory()) walk(full);
@@ -421,8 +432,8 @@ try {
     const required = pkg.info.dependencies || {}, optional = pkg.info.optionalDependencies || {};
     const peers = pkg.info.peerDependencies || {};
     for (const name of [...new Set([...Object.keys(required), ...Object.keys(optional), ...Object.keys(peers)])].sort()) {
-      if (require('node:module').isBuiltin(name)) { node.dependencies.push([name, 'node:' + name]); continue; }
       const child = locate(load, name);
+      if (!child && require('node:module').isBuiltin(name)) { node.dependencies.push([name, 'node:' + name]); continue; }
       if (!child && !(name in optional) && !(pkg.info.peerDependenciesMeta?.[name]?.optional))
         throw new Error('Missing dependency');
       node.dependencies.push([name, child ? visit(child) : null]);

@@ -134,7 +134,8 @@ console.log(JSON.stringify(sources.map(syntaxHash)));
             worker = root / 'worker/shell-worker.js'
             modules = worker.parent / 'node_modules'
             for name, deps in [('just-bash', {'formatter': '*'}),
-                               ('formatter', {'leaf': '*'}), ('leaf', {})]:
+                               ('formatter', {'leaf': '*', 'string_decoder': '*'}),
+                               ('leaf', {}), ('string_decoder', {})]:
                 package = modules / name
                 package.mkdir(parents=True)
                 (package / 'package.json').write_text(json.dumps({
@@ -157,6 +158,16 @@ console.log(JSON.stringify(sources.map(syntaxHash)));
             after = digest()
             (outer / 'index.cjs').write_text('module.exports="changed";')
             self.assertEqual(after, digest())
+            (modules / 'string_decoder/index.cjs').write_text('module.exports=3;')
+            self.assertNotEqual(after, digest())
+            for shadow in ['dist/node_modules/formatter', 'node_modules/undeclared']:
+                directory = modules / 'just-bash' / shadow
+                directory.mkdir(parents=True)
+                program = guard.just_bash_tree_probe_source().replace(
+                    "'/app/dist/src/lib/hosted-bash/shell-worker.js'", json.dumps(str(worker)))
+                result = subprocess.run(['node', '-e', program], capture_output=True, text=True, timeout=10)
+                self.assertNotEqual(result.returncode, 0, shadow)
+                shutil.rmtree(modules / 'just-bash' / shadow.split('/')[0])
 
     def test_bigint_is_supported(self):
         a, b = self.hashes('const a=123n;', 'const a = 123n; // note')

@@ -12,7 +12,7 @@
     "ipaddr_js": "2.2.0"
   },
   "undici_lib_sha256": "213bda9bf7c6860b6714484b606b431c7bdbe4652a20be22e3e20e8b96e1187c",
-  "just_bash_tree_sha256": "ff1f7ad0597080c3a3bb3cf5a752db4527de621a12dcee0f4faa0e6500b7aa9b",
+  "just_bash_tree_sha256": "00292c7b08c74e6aa6a401d935dabc9f0afb0bf46b1d4d72e7335a475c2bf70f",
   "just_bash_version": "3.6.0",
   "hashes": {
     "/app/dist/src/scraper/scrapeURL/engines/index.js": "ff98b31019085de4a21ec2b3b8a4bed788db9de1a790f877d08b4a9d97e22774",
@@ -73,7 +73,7 @@
     "The built-in Firecrawl command calls this API using the socket local address and port, not the caller Host header. Only fixed search/scrape routes are called, preserving their validation. Inline API-key flags are refused.",
     "Docs requests use the fixed docs.firecrawl.dev origin and matching index links; they use normal fetch, including its redirect handling. This audit does not claim arbitrary docs-origin compromise protection.",
     "Syntax fingerprints cover all 11 original files and 11 additional entry/config/helper files. Comments and positions are ignored; executable AST changes, ASI, directives, regexp flags and tagged template raw strings remain significant.",
-    "The full just-bash runtime dependency graph is pinned from the actual shell-worker resolution context: 74 packages and 3529 files, including external sprintf-js, optional-dependency absence and lazy-loaded commands. The independently exported closure SHA256 and graph digest matched in PC WSL. New package content requires qualification. This record is an audited baseline, not a release-version selection restriction.",
+    "The full just-bash runtime dependency graph is pinned from the actual shell-worker resolution context: 77 packages and 3545 files, including external sprintf-js, same-name npm/builtin packages (string_decoder and buffer), optional-dependency absence and lazy-loaded commands. Nested dependency shadows and undeclared root dependencies fail closed. The independently exported closure SHA256 and graph digest matched in PC WSL. New package content requires qualification. This record is an audited baseline, not a release-version selection restriction.",
     "The fork local monitor judge source and socket adapter remain on fork main; the currently deployed core image has no local judge adapter or configured judge socket. The separate monitor service remains an independent deployment."
   ],
   "validation": [
@@ -83,8 +83,8 @@
   ],
   "dependency_tree_counts": {
     "undici_lib": 116,
-    "just_bash": 3529,
-    "just_bash_packages": 74,
-    "closure_export_archive_sha256": "9a3647df5c8b5606f4ac4e464d08b1dc246a9abd356640d3def5501154b8dba8"
+    "just_bash": 3545,
+    "just_bash_packages": 77,
+    "closure_export_archive_sha256": "82ac930f29a9e2deb3973e5fb20d90dcaa51c8f0366c2ead1a0d6248c7b55471"
   }
 }
