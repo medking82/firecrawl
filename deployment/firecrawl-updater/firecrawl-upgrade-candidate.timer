@@ -1,8 +1,9 @@
 [Unit]
-Description=Daily Firecrawl core upgrade candidate and approved cutover
+Description=Nightly Firecrawl automatic upgrades with a second maintenance slot
 
 [Timer]
 OnCalendar=*-*-* 04:30:00
+OnCalendar=*-*-* 05:30:00
 RandomizedDelaySec=30min
 Persistent=true
 Unit=firecrawl-upgrade-candidate.service

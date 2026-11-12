@@ -1,9 +1,11 @@
 # Standalone Firecrawl updater
 
-GA401 owns this updater independently of other applications. Since 2026-10-31 it
-is the approval-gated core upgrade owner, installed as `~/.local/bin/firecrawl-upgrade`
-and run daily by `firecrawl-upgrade-candidate.timer`. `firecrawl-update` and
-`firecrawl-update.timer` stay with the image-only security refresh
+GA401 owns this updater independently of other applications. It is installed as
+`~/.local/bin/firecrawl-upgrade` and run by the systemd user timer
+`firecrawl-upgrade-candidate.timer`, independently of Hermes or an interactive
+session. The reviewed service enables `FIRECRAWL_AUTO_DEPLOY=1`: admitted
+candidates deploy automatically without per-release human approval.
+`firecrawl-update` and `firecrawl-update.timer` stay with the image-only security refresh
 (`../self-hosted-auto/security_refresh.py`). Install a reviewed revision with
 `install_firecrawl_update.py`, the exact installed preimage hash (`absent` for the
 first installation) and the two unit files; enabling the timer is a separate step.
@@ -17,33 +19,52 @@ rollback images exist and preserves the running PostgreSQL and Playwright images
 The timer updates the core API only; monitor and browser overlays have separate
 owners and require their own compatibility review and deployment.
 
-## Approval gate
+## Automatic promotion and retained authorization receipts
 
-The Owner decided on 2026-10-31 that candidates are built automatically and cut
-over only after the Owner approves that exact tag.
+The systemd service checks at 04:30 and 05:30 local time, each with up to 30
+minutes of randomized delay. The second slot retries lock contention or temporary
+health/build failures without repeatedly building throughout the day.
+`Persistent=true` catches a missed calendar run after the host resumes. GA401's
+user manager has lingering enabled so logout does not stop the timer.
 
-1. A scheduled run selects the highest stable `vMAJOR.MINOR.PATCH` tag directly
-   from upstream, across all major and minor versions. Prerelease tags and local
-   or fork-only tags are excluded; the former series setting is no longer used.
-   The run prepares and admits its
-   candidate under `run.lock` and a shared `update.lock`, then writes
-   `candidate-ready.json` (tag, commit, image IDs, checks hash, evidence path) and
-   stops. It never takes the exclusive lock or switches source.
-2. `firecrawl-upgrade --approve vX.Y.Z` writes `approval.json`, bound to the tag,
-   commit, evidence path, checks hash, API image and the receipt's own hash.
-   `firecrawl-upgrade --status` shows the receipt, approval, notice and any blocked tag.
-3. The next run cuts over only if the approval still matches the admitted
-   candidate and the runtime configuration still hashes to the admitted value.
-   It consumes the approval before switching source; a failed cutover rolls back
-   and needs a new candidate and a new approval. Active page reads defer the
-   cutover and keep the approval.
-4. A newer tag supersedes the old receipt and approval. A changed runtime
-   configuration withdraws the approval and rebuilds the candidate. A tag that
-   failed admission is not rebuilt until its guard, `.env` or Compose override changes.
+1. Each run selects the highest stable `vMAJOR.MINOR.PATCH` tag directly from
+   upstream across all major/minor versions. Prerelease and fork-only tags are
+   excluded. It builds and admits a candidate under `run.lock` and a shared
+   `update.lock`, then records the exact commit, images and checks in
+   `candidate-ready.json`.
+2. In automatic mode, successful live health checks and unchanged runtime
+   configuration authorize that exact receipt as `systemd-auto`. The same run
+   revalidates the binding and enters the existing cutover path. A newly built
+   receipt reuses that run's successful live check; an existing receipt requires
+   a fresh live check. Unknown transport, failed package checks, missing rollback
+   images and other failed admission checks never earn automatic authorization.
+3. Cutover acquires the exclusive transport lock, snapshots exact service images
+   and consumes the single-use authorization before switching source. Active
+   page reads defer the cutover and keep the receipt for the next scheduled run.
+   Post-cutover transport, search and scrape smoke tests must pass. Failure rolls
+   back to the prior source and exact images. TERM/INT also invoke recovery;
+   the service allows 15 minutes for shutdown recovery.
+4. An automatic cutover failure also blocks the same tag/commit/config/guard
+   combination, preventing an outage loop at every timer tick. A newer release
+   or changed configuration/guard is evaluated afresh. Build failures and live
+   health failures can retry at the next scheduled run. Changed configuration
+   invalidates prior authorization and rebuilds the candidate first.
+5. A newer tag supersedes the old receipt and authorization. Evidence is retained
+   for diagnosis and rollback. `firecrawl-upgrade --status` shows candidate,
+   authorization, blocked and notice state.
 
-After a successful cutover the updater releases both locks and runs one security
-refresh, so the new API image receives current Debian security packages. The
-security refresh failing does not roll back the core; the notice says so.
+Direct CLI invocations default to `FIRECRAWL_AUTO_DEPLOY=0` (only `0` or `1` is
+accepted), preserving the optional manual `--approve vX.Y.Z` workflow. Turning
+automatic mode off withdraws leftover `systemd-auto` authorizations before
+considering cutover. To disable automation for the system task, override its
+`Environment=FIRECRAWL_AUTO_DEPLOY=0` and reload the user manager. Installing new
+units requires `systemctl --user daemon-reload` and restarting the timer; verify
+the effective service environment and both calendar slots, including drop-ins.
+
+After successful cutover, the updater releases its locks and runs one security
+refresh, so the new API image receives current Debian security packages. Failure
+of that refresh is reported separately and does not roll back the core.
+
 
 Rollback snapshots accept the image-only overlays that earlier owners left in the
 API container's Compose `config_files` (updater `candidate.*`, `brotli-promotion-*`
@@ -56,8 +77,10 @@ overlay, so later security refreshes start from three files again.
 The updater opens or updates one issue, `[Firecrawl Upgrade] GA401 core candidate`,
 in `medking82/pc-maintenance`, assigned to `medking82`, through `gh api` directly
 (Actions can be blocked by billing). It carries the tag, commit, upstream compare
-link, admission and live smoke results and the approve command. Cutover success
-closes it; failure, rollback or a blocked admission comments. Delivery failures are
+link, admission and live smoke results. Automatic mode only reports exceptional
+conditions; a successful automatic run never asks for approval. Manual mode also
+includes the optional approve command. Cutover success closes the notice; failure,
+rollback or blocked admission updates it. Delivery failures are
 retried by the next run and never block the candidate. Issues opened with the
 Owner's own token do not trigger a GitHub email; the issue list is the notice.
 

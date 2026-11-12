@@ -18,6 +18,14 @@ set_restart_policy() { :; }
 validate_config() { :; }
 verify_candidate_manifest() { :; }
 smoke_test() {
+  if [[ -e "$FIXTURE/deployed" && -e "$FIXTURE/pause-after-cutover" ]]; then
+    rm "$FIXTURE/pause-after-cutover"
+    touch "$FIXTURE/cutover-paused"
+    while :; do sleep 1; done
+  fi
+  if [[ -e "$FIXTURE/deployed" && -e "$FIXTURE/smoke-fail-after-cutover" ]]; then
+    rm "$FIXTURE/smoke-fail-after-cutover"; return 1
+  fi
   if [[ -e "$FIXTURE/smoke-fail-once" ]]; then rm "$FIXTURE/smoke-fail-once"; return 1; fi
 }
 snapshot_images() {
@@ -64,6 +72,7 @@ marker = lambda image: fixture / 'images' / image.replace(':', '_')
 if 'config' in args: print((fixture / 'config.json').read_text())
 elif args[:2] == ['image', 'inspect']: sys.exit(0 if marker(args[2]).exists() else 1)
 elif args[:2] == ['image', 'rm']: marker(args[2]).unlink()
+elif 'up' in args: (fixture / 'deployed').touch()
 '''
 
 GH = '''import json, os, sys
@@ -203,6 +212,169 @@ class ApprovalFlowTests(unittest.TestCase):
         self.assertIn('security refresh passed', issue['comments'][-1])
         self.assertEqual(self.run_main().returncode, 0)
         self.assertEqual(len(self.composed_up()), 1)
+
+    def test_auto_deploy_admitted_candidate_in_one_run(self):
+        self.env['FIRECRAWL_AUTO_DEPLOY'] = '1'
+        self.release('v2.11.2')
+        result = self.run_main()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.head(), 'v2.11.2')
+        self.assertEqual(len(self.composed_up()), 1)
+        self.assertFalse((self.state / 'approval.json').exists())
+        approvals = list((self.state / 'approvals').glob('consumed-*.json'))
+        self.assertEqual(len(approvals), 1)
+        approval = json.loads(approvals[0].read_text())
+        self.assertEqual(approval['approved_by'], 'systemd-auto')
+        self.assertEqual(approval['tag'], 'v2.11.2')
+        self.assertTrue((self.fixture / 'security-refreshed').exists())
+        self.assertEqual(self.issues(), {})
+        self.assertEqual(self.run_main().returncode, 0)
+        self.assertEqual(len(self.composed_up()), 1)
+
+    def test_auto_deploy_resumes_an_existing_admitted_candidate(self):
+        self.release('v2.11.2')
+        self.assertEqual(self.run_main().returncode, 0)
+        self.assertEqual(self.head(), 'v2.11.1')
+        self.env['FIRECRAWL_AUTO_DEPLOY'] = '1'
+        result = self.run_main()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.head(), 'v2.11.2')
+        self.assertEqual(self.calls(), ['prepare v2.11.2'])
+        self.assertEqual(len(self.composed_up()), 1)
+
+    def test_auto_deploy_rejects_invalid_policy_before_building(self):
+        self.env['FIRECRAWL_AUTO_DEPLOY'] = 'yes'
+        self.release('v2.11.2')
+        result = self.run_main()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('FIRECRAWL_AUTO_DEPLOY', result.stderr)
+        self.assertEqual(self.calls(), [])
+        self.assertEqual(self.head(), 'v2.11.1')
+
+    def test_auto_deploy_waits_when_preparation_live_smoke_fails(self):
+        self.env['FIRECRAWL_AUTO_DEPLOY'] = '1'
+        self.release('v2.11.2')
+        (self.fixture / 'smoke-fail-once').touch()
+        result = self.run_main()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.head(), 'v2.11.1')
+        self.assertEqual(self.composed_up(), [])
+        self.assertFalse((self.state / 'approval.json').exists())
+        self.assertTrue((self.state / 'candidate-ready.json').exists())
+        # A later healthy run resumes this receipt without rebuilding it.
+        result = self.run_main()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.head(), 'v2.11.2')
+        self.assertEqual(self.calls(), ['prepare v2.11.2'])
+
+    def test_auto_deploy_quarantines_a_failed_cutover(self):
+        self.env['FIRECRAWL_AUTO_DEPLOY'] = '1'
+        self.release('v2.11.2')
+        (self.fixture / 'smoke-fail-after-cutover').touch()
+        result = self.run_main()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.head(), 'v2.11.1')
+        self.assertIn('restore', self.calls())
+        self.assertFalse((self.state / 'approval.json').exists())
+        self.assertFalse((self.state / 'candidate-ready.json').exists())
+        # A successful rollback must not cause another outage every timer tick.
+        result = self.run_main()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.head(), 'v2.11.1')
+        self.assertEqual(len(self.composed_up()), 1)
+        blocked = json.loads((self.state / 'candidate-blocked.json').read_text())
+        self.assertEqual(blocked['admission'], 'cutover_failed')
+        # A different release is evaluated afresh rather than globally disabling updates.
+        self.release('v2.11.3')
+        result = self.run_main()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.head(), 'v2.11.3')
+
+    def test_auto_deploy_defers_to_active_readers_then_resumes(self):
+        import fcntl
+        self.release('v2.11.2')
+        self.assertEqual(self.run_main().returncode, 0)
+        self.env['FIRECRAWL_AUTO_DEPLOY'] = '1'
+        with (self.state / 'update.lock').open('rb') as reader:
+            fcntl.flock(reader, fcntl.LOCK_SH)
+            result = self.run_main()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('active page reads', result.stdout)
+            self.assertEqual(self.head(), 'v2.11.1')
+            self.assertTrue((self.state / 'approval.json').exists())
+            self.assertEqual(self.composed_up(), [])
+        result = self.run_main()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.head(), 'v2.11.2')
+        self.assertEqual(self.calls(), ['prepare v2.11.2'])
+
+    def test_auto_deploy_rebuilds_stale_configuration_before_cutover(self):
+        self.release('v2.11.2')
+        self.assertEqual(self.run_main().returncode, 0)
+        old = json.loads((self.state / 'candidate-ready.json').read_text())
+        (self.fixture / 'config.json').write_text(json.dumps({'services': {'api': {'environment': {'A': '2'}}}}))
+        self.env['FIRECRAWL_AUTO_DEPLOY'] = '1'
+        result = self.run_main()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.head(), 'v2.11.2')
+        self.assertEqual(self.calls().count('prepare v2.11.2'), 2)
+        self.assertEqual(len(self.composed_up()), 1)
+        self.assertNotIn(old['evidence'] + '/images.json', self.composed_up()[0])
+
+    def test_auto_deploy_never_promotes_unknown_transport(self):
+        self.env['FIRECRAWL_AUTO_DEPLOY'] = '1'
+        self.release('v2.11.2')
+        (self.fixture / 'admission').write_text('awaiting_transport_review')
+        self.assertNotEqual(self.run_main().returncode, 0)
+        self.assertFalse((self.state / 'approval.json').exists())
+        self.assertEqual(self.run_main().returncode, 0)
+        self.assertEqual(self.calls(), ['prepare v2.11.2'])
+        self.assertEqual(self.head(), 'v2.11.1')
+        self.assertEqual(self.composed_up(), [])
+
+    def test_disabling_auto_deploy_withdraws_deferred_auto_authorization(self):
+        import fcntl
+        self.release('v2.11.2')
+        self.assertEqual(self.run_main().returncode, 0)
+        self.env['FIRECRAWL_AUTO_DEPLOY'] = '1'
+        with (self.state / 'update.lock').open('rb') as reader:
+            fcntl.flock(reader, fcntl.LOCK_SH)
+            self.assertEqual(self.run_main().returncode, 0)
+        self.assertTrue((self.state / 'approval.json').exists())
+        self.env['FIRECRAWL_AUTO_DEPLOY'] = '0'
+        result = self.run_main()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.head(), 'v2.11.1')
+        self.assertFalse((self.state / 'approval.json').exists())
+        self.assertEqual(self.composed_up(), [])
+        self.assertTrue((self.state / 'candidate-ready.json').exists())
+
+    def test_auto_cutover_termination_rolls_back(self):
+        import signal
+        import time
+        self.env['FIRECRAWL_AUTO_DEPLOY'] = '1'
+        self.release('v2.11.2')
+        (self.fixture / 'pause-after-cutover').touch()
+        script = 'source "$1"; shift\n' + STUBS + 'main "$@"\n'
+        child = subprocess.Popen(['bash', '-c', script, 'fixture', str(SOURCE)], env=self.env,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+        try:
+            deadline = time.monotonic() + 8
+            while not (self.fixture / 'cutover-paused').exists():
+                self.assertIsNone(child.poll())
+                self.assertLess(time.monotonic(), deadline)
+                time.sleep(.02)
+            os.killpg(child.pid, signal.SIGTERM)
+            output, error = child.communicate(timeout=8)
+            self.assertEqual(child.returncode, 143, output + error)
+            self.assertEqual(self.head(), 'v2.11.1')
+            self.assertIn('restore', self.calls())
+            self.assertFalse((self.state / 'approval.json').exists())
+            self.assertTrue((self.state / 'candidate-blocked.json').exists())
+        finally:
+            if child.poll() is None:
+                os.killpg(child.pid, signal.SIGKILL)
+                child.communicate(timeout=5)
 
     def test_newer_tag_invalidates_approval_and_retains_superseded_candidate(self):
         self.release('v2.11.2')

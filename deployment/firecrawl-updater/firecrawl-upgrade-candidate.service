@@ -1,11 +1,15 @@
 [Unit]
-Description=Build and admit Firecrawl core upgrade candidates; cut over only an Owner-approved tag
+Description=Automatically build, verify and deploy admitted Firecrawl core upgrades
 After=docker.service
 
 [Service]
 Type=oneshot
 UMask=0077
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=FIRECRAWL_AUTO_DEPLOY=1
 ExecStart=%h/.local/bin/firecrawl-upgrade
-TimeoutStartSec=4h
+# Allow a source build plus the bounded post-cutover security refresh retries.
+TimeoutStartSec=10h
+# TERM invokes updater rollback; leave time for recovery and its smoke checks.
+TimeoutStopSec=15min
 NoNewPrivileges=yes

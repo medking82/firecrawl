@@ -797,8 +797,8 @@ PY
 }
 
 rollback() {
-  local original_rc=$? failed=0 rolled=0
-  trap - ERR
+  local original_rc=${1:-$?} failed=0 rolled=0
+  trap - ERR TERM INT
   set +e
   if [[ "$rollback_active" -eq 1 && -n "$previous_commit" ]]; then
     rolled=1
@@ -845,6 +845,9 @@ failure_notice() {
         log "upgrade notice not delivered; retrying next run"
       ;;
     cutover)
+      if [[ "${FIRECRAWL_AUTO_DEPLOY:-0}" == 1 ]]; then
+        gate quarantine "$state_dir" "$repo" "$latest_tag" "$latest_commit" "$guard_sha256" "${candidate_evidence:--}"
+      fi
       gate retire "$state_dir" failed
       if [[ "$rolled" -eq 1 && "$failed" -eq 0 ]]; then
         detail="cutover failed; previous version restored and smoke passed"
@@ -1130,6 +1133,11 @@ elif command == 'approve':
     write(approval_path, approval, exclusive=True)
     record(value, 'approved', approval_nonce=approval['nonce'])
     print(json.dumps({'approved': tag, 'commit': value['commit']}))
+elif command == 'withdraw-auto':
+    if approval_path.exists():
+        approval = load(approval_path)
+        if approval.get('approved_by') == 'systemd-auto':
+            move(approval_path, state / 'approvals', 'disabled', approval.get('nonce'))
 elif command == 'approved':
     tag, commit = args
     if not approval_path.exists(): sys.exit(3)
@@ -1188,6 +1196,10 @@ elif command == 'block':
     if report and report.get('status') in ('awaiting_transport_review', 'blocked'):
         write(state / 'candidate-blocked.json', {'key': blocked_key(repo, tag, commit, guard), 'tag': tag, 'commit': commit,
               'admission': report['status'], 'evidence': evidence, 'recorded_at': now()})
+elif command == 'quarantine':
+    repo, tag, commit, guard, evidence = args
+    write(state / 'candidate-blocked.json', {'key': blocked_key(repo, tag, commit, guard), 'tag': tag, 'commit': commit,
+          'admission': 'cutover_failed', 'evidence': evidence, 'recorded_at': now()})
 elif command == 'blocked':
     repo, tag, commit, guard = args
     path = state / 'candidate-blocked.json'
@@ -1240,6 +1252,26 @@ approve_candidate() {
   log "approved $tag; the next firecrawl-upgrade run cuts over (run firecrawl-upgrade to start now)"
 }
 
+auto_deploy_candidate() {
+  local output fields
+  # The caller already holds run.lock and the shared transport lock.
+  # Recheck live health and the receipt/configuration before issuing a bound,
+  # single-use authorization on behalf of the configured automation policy.
+  # A successful preparation already performed the same live check moments ago.
+  if [[ "${1:-}" != passed ]] && ! smoke_test; then
+    gate notify "$state_dir" cutover_failed "$latest_tag" "$latest_commit" "$(gate field "$state_dir" evidence)" \
+      "${previous_tag:-$previous_commit}" "automatic deployment deferred; current runtime smoke failed; retrying next scheduled run" ||
+      log "upgrade notice not delivered"
+    return 1
+  fi
+  gate config "$state_dir" "$repo"
+  gate approve "$state_dir" "$latest_tag" systemd-auto
+  output=$(gate approved "$state_dir" "$latest_tag" "$latest_commit")
+  mapfile -t fields <<<"$output"
+  candidate_evidence=${fields[0]} candidate_dir=${fields[1]} candidate_checks_sha256=${fields[2]}
+  cutover_candidate
+}
+
 cutover_candidate() {
   phase=precheck
   # Do not interrupt an existing guarded read. Conversion may drop SH on failure;
@@ -1255,7 +1287,11 @@ cutover_candidate() {
   # Single use: from here a failure needs a new candidate and a new approval.
   gate consume "$state_dir"
   phase=cutover
-  log "updating ${previous_tag:-$previous_commit} to $latest_tag (Owner approved)"
+  if [[ "${FIRECRAWL_AUTO_DEPLOY:-0}" == 1 ]]; then
+    log "updating ${previous_tag:-$previous_commit} to $latest_tag (automatic upgrade policy)"
+  else
+    log "updating ${previous_tag:-$previous_commit} to $latest_tag (Owner approved)"
+  fi
   rollback_active=1
   git checkout --detach "$latest_tag"
   preserve_retired_notice
@@ -1318,6 +1354,10 @@ PYCHECKLOCK
     printf '%s\n' 'Usage: firecrawl-upgrade [--check-only | --status | --approve vX.Y.Z]' >&2
     return 64
   fi
+  case "${FIRECRAWL_AUTO_DEPLOY:-0}" in
+    0|1) ;;
+    *) printf '%s\n' 'FIRECRAWL_AUTO_DEPLOY must be 0 or 1' >&2; return 64 ;;
+  esac
   if [[ "$repo" == '/home/marck/github/firecrawl' && "$state_dir" != "$canonical_state_dir" ]]; then
     log "The production Firecrawl checkout requires its canonical coordination lock"
     return 1
@@ -1328,6 +1368,8 @@ PYCHECKLOCK
     return
   fi
   trap rollback ERR
+  trap 'rollback 143' TERM
+  trap 'rollback 130' INT
   cd "$repo"
   test -f .env
   chmod 600 .env
@@ -1359,10 +1401,16 @@ PYCHECKLOCK
     return
   fi
   local approval=0 config=0 output fields
+  if [[ "${FIRECRAWL_AUTO_DEPLOY:-0}" == 0 ]]; then
+    gate withdraw-auto "$state_dir"
+  fi
   output=$(gate approved "$state_dir" "$latest_tag" "$latest_commit") || approval=$?
   if [[ "$approval" -eq 0 ]] || gate ready "$state_dir" "$latest_tag" "$latest_commit"; then
     gate config "$state_dir" "$repo" || config=$?
-    if [[ "$config" -eq 0 && "$approval" -eq 0 ]]; then
+    if [[ "$config" -eq 0 && "${FIRECRAWL_AUTO_DEPLOY:-0}" == 1 ]]; then
+      auto_deploy_candidate
+      return
+    elif [[ "$config" -eq 0 && "$approval" -eq 0 ]]; then
       mapfile -t fields <<<"$output"
       candidate_evidence=${fields[0]} candidate_dir=${fields[1]} candidate_checks_sha256=${fields[2]}
       cutover_candidate
@@ -1391,9 +1439,22 @@ PYCHECKLOCK
   smoke_test || smoke=failed
   gate receipt "$state_dir" "$latest_tag" "$latest_commit" "$candidate_evidence" "$candidate_checks_sha256" \
     "$candidate_dir" "${candidate_base_image:--}" "$smoke"
-  gate notify "$state_dir" ready "$latest_tag" "$latest_commit" "$candidate_evidence" \
-    "${previous_tag:-$previous_commit}" "$smoke" || log "upgrade notice not delivered; retrying next run"
-  log "candidate $latest_tag admitted; awaiting Owner approval (firecrawl-upgrade --approve $latest_tag)"
+  if [[ "${FIRECRAWL_AUTO_DEPLOY:-0}" == 1 ]]; then
+    if [[ "$smoke" != passed ]]; then
+      gate notify "$state_dir" cutover_failed "$latest_tag" "$latest_commit" "$candidate_evidence" \
+        "${previous_tag:-$previous_commit}" "automatic deployment deferred; current runtime smoke failed; retrying next scheduled run" ||
+        log "upgrade notice not delivered"
+      log "candidate $latest_tag retained; live smoke failed, retrying next scheduled run"
+      return 1
+    fi
+    log "candidate $latest_tag admitted; deploying under the automatic upgrade policy"
+    # Keep this a simple command so ERR/errexit still trigger rollback in callees.
+    auto_deploy_candidate "$smoke"
+  else
+    gate notify "$state_dir" ready "$latest_tag" "$latest_commit" "$candidate_evidence" \
+      "${previous_tag:-$previous_commit}" "$smoke" || log "upgrade notice not delivered; retrying next run"
+    log "candidate $latest_tag admitted; awaiting Owner approval (firecrawl-upgrade --approve $latest_tag)"
+  fi
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
