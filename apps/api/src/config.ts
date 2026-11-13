@@ -144,6 +144,7 @@ const configSchema = z.object({
   GOV_INDEX_CALLS_PER_DAY_OVERRIDES: teamDailyLimits,
   LABS_SEARCH_URL: z.string().url().optional(),
   LABS_SEARCH_SECRET: z.string().optional(),
+  FRESH_FEED_URL: emptyStringAsUndefined(z.string().url()),
 
   // Express
   EXPRESS_TRUST_PROXY: z.coerce.number().optional(),
@@ -395,6 +396,8 @@ const configSchema = z.object({
 
   // Google Cloud Pub/Sub
   PUBSUB_CREDENTIALS: z.string().optional(),
+  // Publishes with ambient credentials when PUBSUB_CREDENTIALS is unset.
+  PUBSUB_PROJECT_ID: emptyStringAsUndefined(z.string().trim().min(1)),
   // Prepended to every log topic name. Production leaves it unset and
   // publishes to `<table>`; staging sets `staging-` so its rows land in the
   // `staging-<table>` topics and the staging ClickHouse database instead of
@@ -720,6 +723,8 @@ const configSchema = z.object({
   MODEL_EMBEDDING_NAME: z.string().optional(),
   OLLAMA_BASE_URL: z.string().optional(),
   VERTEX_CREDENTIALS: z.string().optional(),
+  // Uses Vertex with ambient credentials when VERTEX_CREDENTIALS is unset.
+  VERTEX_USE_ADC: z.stringbool().default(false),
 
   // LangSmith (tracing for interact agent)
   LANGSMITH_API_KEY: z.string().optional(),
