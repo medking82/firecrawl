@@ -550,6 +550,70 @@ from pathlib import Path
 guard_path, guard_sha256, source, repo, tag, commit, evidence, patched_image = sys.argv[1:]
 if not re.fullmatch(r'sha256:[0-9a-f]{64}', patched_image): raise SystemExit('Invalid patched image ID')
 evidence = Path(evidence)
+# BEGIN SEARCH CONTRACT (generated from search_runtime_contract.py)
+"""Frozen reviewed search runtime; embedded into the standalone updater.
+
+Changing executable mounts or isolation requires source review and requalification.
+Image IDs are deployment inputs and are verified separately, never learned here.
+"""
+import hashlib
+import json
+from pathlib import Path
+import re
+
+EXPECTED = {'services': {'search-worker': {'restart': 'unless-stopped', 'cap_drop': ['ALL'], 'cpus': 1, 'command': ['--require', '/app/searxng-timeout.cjs', '/app/search-worker.cjs'], 'dns': ['127.0.0.1'], 'entrypoint': ['node'], 'environment': {'SEARCH_TRACE': '1', 'SEARCH_WORKER_ROLE': '1', 'SEARXNG_CATEGORIES': 'general', 'SEARXNG_ENDPOINT': 'http://searxng:8080', 'SEARXNG_ENGINES': 'brave,yahoo', 'USE_DB_AUTHENTICATION': 'false'}, 'mem_limit': '536870912', 'networks': {'search': {'ipv4_address': '172.30.247.20'}}, 'read_only': True, 'security_opt': ['no-new-privileges:true'], 'tmpfs': ['/tmp:rw,noexec,nosuid,size=32m'], 'user': '1000:1000', 'volumes': [{'type': 'bind', 'source': '/opt/firecrawl-search/searxng-timeout.cjs', 'target': '/app/searxng-timeout.cjs', 'read_only': True, 'bind': {}}, {'type': 'bind', 'source': '/opt/firecrawl-search/search-deadline.cjs', 'target': '/app/search-deadline.cjs', 'read_only': True, 'bind': {}}, {'type': 'bind', 'source': '/opt/firecrawl-search/search-worker.cjs', 'target': '/app/search-worker.cjs', 'read_only': True, 'bind': {}}], 'working_dir': '/app', 'expose': ['8081']}, 'search-egress': {'restart': 'unless-stopped', 'cap_drop': ['ALL'], 'cpus': 1, 'command': [], 'entrypoint': ['python3', '-I', '-B', '/app/search_egress.py'], 'mem_limit': '134217728', 'networks': {'search': {'ipv4_address': '172.30.247.40'}, 'search_egress': {'gw_priority': 1, 'ipv4_address': '172.30.248.2'}}, 'read_only': True, 'security_opt': ['no-new-privileges:true'], 'tmpfs': ['/tmp:rw,noexec,nosuid,size=32m'], 'user': '65534:65534', 'volumes': [{'type': 'bind', 'source': '/opt/firecrawl-search/search_egress.py', 'target': '/app/search_egress.py', 'read_only': True, 'bind': {}}], 'working_dir': '/app', 'expose': ['3128']}, 'searxng': {'restart': 'unless-stopped', 'cap_drop': ['ALL'], 'cpus': 1, 'command': None, 'dns': ['127.0.0.1'], 'entrypoint': None, 'environment': {'SEARXNG_SECRET': '<private>'}, 'mem_limit': '536870912', 'networks': {'search': {'ipv4_address': '172.30.247.30'}}, 'security_opt': ['no-new-privileges:true'], 'volumes': [{'type': 'bind', 'source': '/opt/firecrawl-search/settings.yml', 'target': '/etc/searxng/settings.yml', 'read_only': True, 'bind': {}}], 'expose': ['8080'], 'healthcheck': {'test': ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:8080/healthz'], 'timeout': '5s', 'interval': '30s', 'retries': 3}}}, 'networks': {'search': {'name': 'firecrawl_search', 'driver': 'bridge', 'driver_opts': {'com.docker.network.bridge.name': 'br-fc-search'}, 'ipam': {'config': [{'subnet': '172.30.247.0/24'}]}, 'internal': True, 'enable_ipv6': False}, 'search_egress': {'name': 'firecrawl_search_egress', 'driver': 'bridge', 'driver_opts': {'com.docker.network.bridge.name': 'br-fc-egress'}, 'ipam': {'config': [{'subnet': '172.30.248.0/24'}]}, 'enable_ipv6': False}}, 'api': {'volumes': [{'type': 'volume', 'source': 'fdb-cluster-file', 'target': '/var/fdb', 'read_only': True, 'volume': {}}, {'type': 'bind', 'source': '/opt/firecrawl-search/searxng-timeout.cjs', 'target': '/app/searxng-timeout.cjs', 'read_only': True, 'bind': {}}, {'type': 'bind', 'source': '/opt/firecrawl-search/search-deadline.cjs', 'target': '/app/search-deadline.cjs', 'read_only': True, 'bind': {}}], 'networks': {'backend': None, 'search': {'ipv4_address': '172.30.247.10'}}, 'environment': {'NODE_OPTIONS': '--require=/app/searxng-timeout.cjs', 'SEARCH_TRACE': '1', 'SEARCH_WORKER_URL': 'http://search-worker:8081/v2/search', 'SEARXNG_CATEGORIES': 'general', 'SEARXNG_ENDPOINT': 'http://searxng:8080', 'SEARXNG_ENGINES': 'brave,yahoo'}}, 'searx_secret_keys': ['SEARXNG_SECRET'], 'files': {'/opt/firecrawl-search/isolation.nft': '6aec975f4633df6ac9c37c5d57ecb2a77ca723052351248476dd9c8c45c7878e', '/opt/firecrawl-search/searxng-timeout.cjs': 'cd817b3dc902cab028d931b8eef49c6b0b806c3886773a42b37b54fba41516e0', '/opt/firecrawl-search/search_egress.py': '76cbe7ddf85c92d241df6c3e5864d5c8a7e1cade9137e15ef4b13a257763d9cb', '/opt/firecrawl-search/settings.yml': '25b2bf490f0db087a9df14e77da1d09c8f17b8ae0982ac50726d164bb4a41179', '/opt/firecrawl-search/search-worker.cjs': '7cfa7550402f39a20a3dcbee2aae1c72033d4185dd06bd995a212acfd40f4da6', '/opt/firecrawl-search/search-deadline.cjs': 'b10e175c301d990c177ebd67794dea2face560bf3dd5fa208a8970e7ce37705a'}}
+
+
+def search_contract(config, check_files=True):
+    services = config['services']
+    names = set(EXPECTED['services'])
+    api = services['api']
+    env = api.get('environment') or {}
+    active = bool(names & set(services) or env.get('NODE_OPTIONS') or env.get('SEARCH_WORKER_URL'))
+    if not active:
+        return None
+    if not names <= set(services):
+        raise ValueError('search_service_missing')
+    for name, expected in EXPECTED['services'].items():
+        value = json.loads(json.dumps(services[name]))
+        for key in ('image','pull_policy'): value.pop(key, None)
+        if name == 'searxng':
+            private = value.get('environment') or {}
+            if sorted(private) != EXPECTED['searx_secret_keys'] or any(not v for v in private.values()):
+                raise ValueError('search_secret_contract')
+            value['environment'] = {k:'<private>' for k in private}
+        if value != expected:
+            raise ValueError('search_service_drift')
+    for name, expected in EXPECTED['networks'].items():
+        if config.get('networks',{}).get(name) != expected:
+            raise ValueError('search_network_drift')
+    for key in ('volumes','networks'):
+        if api.get(key) != EXPECTED['api'][key]:
+            raise ValueError('search_api_drift')
+    selected = {k:v for k,v in env.items() if k.startswith(('SEARCH_','SEARXNG_')) or k=='NODE_OPTIONS'}
+    if selected != EXPECTED['api']['environment']:
+        raise ValueError('search_environment_drift')
+    if check_files:
+        for name, expected in EXPECTED['files'].items():
+            p = Path(name)
+            if any(v.is_symlink() for v in (p,*p.parents)) or not p.is_file():
+                raise ValueError('search_file_unavailable')
+            if hashlib.sha256(p.read_bytes()).hexdigest() != expected:
+                raise ValueError('search_file_drift')
+    return EXPECTED['files'].copy()
+
+
+def search_image_overlay(path):
+    # Exactly one historical API pin. It grants no permission for other overlays.
+    path = Path(path)
+    if path != Path.cwd()/'docker-compose.search-image.json': return False
+    if any(v.is_symlink() for v in (path,*path.parents)): return False
+    value = json.loads(path.read_bytes())
+    if set(value) != {'services'} or set(value['services']) != {'api'}: return False
+    entry = value['services']['api']
+    return (set(entry) <= {'image','pull_policy'} and entry.get('pull_policy','never') == 'never'
+            and re.fullmatch(r'sha256:[a-f0-9]{64}',entry.get('image','')) is not None)
+# END SEARCH CONTRACT
 def run(args, **kw):
     return subprocess.run(args, check=True, capture_output=True, text=True, timeout=60, **kw).stdout
 compose = ['docker','compose','--project-name','firecrawl','--env-file',repo+'/.env','-f',source+'/docker-compose.yaml','-f',repo+'/docker-compose.override.yaml']
@@ -563,9 +627,12 @@ report = {'schema':1,'status':'blocked','tag':tag,'source_commit':commit}
 identity = None
 try:
     config = json.loads(run(compose+['config','--format','json']))
+    search_files = search_contract(config)
     protected = {'nuq-postgres': 'firecrawl-nuq-postgres-1',
                  'playwright-service': 'firecrawl-playwright-service-1'}
     if not set(protected).issubset(config['services']): raise ValueError('protected_service_missing')
+    if search_files:
+        protected.update(searxng='firecrawl-searxng-1', **{'search-egress':'firecrawl-search-egress-1'})
     images = {}
     for name, service in config['services'].items():
         if name in protected:
@@ -575,7 +642,7 @@ try:
             image = current.get('image')
             if not isinstance(image,str) or not re.fullmatch(r'sha256:[0-9a-f]{64}',image): raise ValueError('protected_image_identity')
         else:
-            image = patched_image if name == 'api' else service.get('image') or 'firecrawl-'+name
+            image = patched_image if name == 'api' or (search_files and name == 'search-worker') else service.get('image') or 'firecrawl-'+name
         value = json.loads(run(['docker','image','inspect',image]))[0]
         if not re.fullmatch(r'sha256:[0-9a-f]{64}',value['Id']): raise ValueError('image_identity')
         images[name] = {'image':value['Id'],'pull_policy':'never'}
@@ -588,7 +655,7 @@ try:
                  'read_only':True,'volume':{}}
     if (any(api.get(key) for key in forbidden)
             or api.get('working_dir','/app') != '/app'
-            or api.get('volumes',[]) not in ([], [fdb_mount])):
+            or (not search_files and api.get('volumes',[]) not in ([], [fdb_mount]))):
         raise ValueError('unsupported_api_runtime')
     metadata = json.loads(run(['docker','image','inspect',images['api']['image']]))[0]['Config']
     command = api.get('command') if api.get('command') is not None else metadata.get('Cmd')
@@ -616,7 +683,7 @@ try:
         name,kind=key.rsplit('_',1)
         actual=env.get(name)=='true' if kind=='true' else bool(env.get(name))
         if actual is not expected: raise ValueError('candidate_configuration')
-    if env.get('ALLOW_LOCAL_WEBHOOKS') or env.get('DOTENV_CONFIG_PATH') or env.get('NODE_OPTIONS') or env.get('USE_DB_AUTHENTICATION')!='false':
+    if env.get('ALLOW_LOCAL_WEBHOOKS') or env.get('DOTENV_CONFIG_PATH') or (env.get('NODE_OPTIONS') and not search_files) or env.get('USE_DB_AUTHENTICATION')!='false':
         raise ValueError('candidate_safeguards')
     # No credentials, volumes, service entrypoint or network in the probe container.
     identity=run(['docker','run','-d','--network','none','--read-only','--cap-drop','ALL',
@@ -647,6 +714,7 @@ try:
             or result.get('container_id') != identity):
         report['status']='awaiting_transport_review'
         raise ValueError('unadmitted_transport')
+    report['search_files'] = search_files
     report.update(status='checks_passed',runtime_config_sha256=digest(contract(config)),images=images,
         review_basis={'kind':'installed_reviewed_transport_profile','profile':profile,'receipt_sha256':guard.TRANSPORT_PROFILES[profile]['receipt_sha256']})
     (evidence/'images.json').write_text(json.dumps({'services':images},sort_keys=True))
@@ -674,13 +742,79 @@ if hashlib.sha256((root/'checks.json').read_bytes()).hexdigest()!=sys.argv[5]: r
 report=json.loads((root/'checks.json').read_text())
 if report.get('status')!='checks_passed' or report.get('source_commit')!=commit: raise SystemExit('Candidate checks missing or stale')
 if any(item.is_symlink() for item in (guard, *guard.parents)) or hashlib.sha256(guard.read_bytes()).hexdigest()!=expected or expected!=report['guard_sha256']: raise SystemExit('Reviewed guard changed')
+
+# BEGIN SEARCH CONTRACT (generated from search_runtime_contract.py)
+"""Frozen reviewed search runtime; embedded into the standalone updater.
+
+Changing executable mounts or isolation requires source review and requalification.
+Image IDs are deployment inputs and are verified separately, never learned here.
+"""
+import hashlib
+import json
+from pathlib import Path
+import re
+
+EXPECTED = {'services': {'search-worker': {'restart': 'unless-stopped', 'cap_drop': ['ALL'], 'cpus': 1, 'command': ['--require', '/app/searxng-timeout.cjs', '/app/search-worker.cjs'], 'dns': ['127.0.0.1'], 'entrypoint': ['node'], 'environment': {'SEARCH_TRACE': '1', 'SEARCH_WORKER_ROLE': '1', 'SEARXNG_CATEGORIES': 'general', 'SEARXNG_ENDPOINT': 'http://searxng:8080', 'SEARXNG_ENGINES': 'brave,yahoo', 'USE_DB_AUTHENTICATION': 'false'}, 'mem_limit': '536870912', 'networks': {'search': {'ipv4_address': '172.30.247.20'}}, 'read_only': True, 'security_opt': ['no-new-privileges:true'], 'tmpfs': ['/tmp:rw,noexec,nosuid,size=32m'], 'user': '1000:1000', 'volumes': [{'type': 'bind', 'source': '/opt/firecrawl-search/searxng-timeout.cjs', 'target': '/app/searxng-timeout.cjs', 'read_only': True, 'bind': {}}, {'type': 'bind', 'source': '/opt/firecrawl-search/search-deadline.cjs', 'target': '/app/search-deadline.cjs', 'read_only': True, 'bind': {}}, {'type': 'bind', 'source': '/opt/firecrawl-search/search-worker.cjs', 'target': '/app/search-worker.cjs', 'read_only': True, 'bind': {}}], 'working_dir': '/app', 'expose': ['8081']}, 'search-egress': {'restart': 'unless-stopped', 'cap_drop': ['ALL'], 'cpus': 1, 'command': [], 'entrypoint': ['python3', '-I', '-B', '/app/search_egress.py'], 'mem_limit': '134217728', 'networks': {'search': {'ipv4_address': '172.30.247.40'}, 'search_egress': {'gw_priority': 1, 'ipv4_address': '172.30.248.2'}}, 'read_only': True, 'security_opt': ['no-new-privileges:true'], 'tmpfs': ['/tmp:rw,noexec,nosuid,size=32m'], 'user': '65534:65534', 'volumes': [{'type': 'bind', 'source': '/opt/firecrawl-search/search_egress.py', 'target': '/app/search_egress.py', 'read_only': True, 'bind': {}}], 'working_dir': '/app', 'expose': ['3128']}, 'searxng': {'restart': 'unless-stopped', 'cap_drop': ['ALL'], 'cpus': 1, 'command': None, 'dns': ['127.0.0.1'], 'entrypoint': None, 'environment': {'SEARXNG_SECRET': '<private>'}, 'mem_limit': '536870912', 'networks': {'search': {'ipv4_address': '172.30.247.30'}}, 'security_opt': ['no-new-privileges:true'], 'volumes': [{'type': 'bind', 'source': '/opt/firecrawl-search/settings.yml', 'target': '/etc/searxng/settings.yml', 'read_only': True, 'bind': {}}], 'expose': ['8080'], 'healthcheck': {'test': ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:8080/healthz'], 'timeout': '5s', 'interval': '30s', 'retries': 3}}}, 'networks': {'search': {'name': 'firecrawl_search', 'driver': 'bridge', 'driver_opts': {'com.docker.network.bridge.name': 'br-fc-search'}, 'ipam': {'config': [{'subnet': '172.30.247.0/24'}]}, 'internal': True, 'enable_ipv6': False}, 'search_egress': {'name': 'firecrawl_search_egress', 'driver': 'bridge', 'driver_opts': {'com.docker.network.bridge.name': 'br-fc-egress'}, 'ipam': {'config': [{'subnet': '172.30.248.0/24'}]}, 'enable_ipv6': False}}, 'api': {'volumes': [{'type': 'volume', 'source': 'fdb-cluster-file', 'target': '/var/fdb', 'read_only': True, 'volume': {}}, {'type': 'bind', 'source': '/opt/firecrawl-search/searxng-timeout.cjs', 'target': '/app/searxng-timeout.cjs', 'read_only': True, 'bind': {}}, {'type': 'bind', 'source': '/opt/firecrawl-search/search-deadline.cjs', 'target': '/app/search-deadline.cjs', 'read_only': True, 'bind': {}}], 'networks': {'backend': None, 'search': {'ipv4_address': '172.30.247.10'}}, 'environment': {'NODE_OPTIONS': '--require=/app/searxng-timeout.cjs', 'SEARCH_TRACE': '1', 'SEARCH_WORKER_URL': 'http://search-worker:8081/v2/search', 'SEARXNG_CATEGORIES': 'general', 'SEARXNG_ENDPOINT': 'http://searxng:8080', 'SEARXNG_ENGINES': 'brave,yahoo'}}, 'searx_secret_keys': ['SEARXNG_SECRET'], 'files': {'/opt/firecrawl-search/isolation.nft': '6aec975f4633df6ac9c37c5d57ecb2a77ca723052351248476dd9c8c45c7878e', '/opt/firecrawl-search/searxng-timeout.cjs': 'cd817b3dc902cab028d931b8eef49c6b0b806c3886773a42b37b54fba41516e0', '/opt/firecrawl-search/search_egress.py': '76cbe7ddf85c92d241df6c3e5864d5c8a7e1cade9137e15ef4b13a257763d9cb', '/opt/firecrawl-search/settings.yml': '25b2bf490f0db087a9df14e77da1d09c8f17b8ae0982ac50726d164bb4a41179', '/opt/firecrawl-search/search-worker.cjs': '7cfa7550402f39a20a3dcbee2aae1c72033d4185dd06bd995a212acfd40f4da6', '/opt/firecrawl-search/search-deadline.cjs': 'b10e175c301d990c177ebd67794dea2face560bf3dd5fa208a8970e7ce37705a'}}
+
+
+def search_contract(config, check_files=True):
+    services = config['services']
+    names = set(EXPECTED['services'])
+    api = services['api']
+    env = api.get('environment') or {}
+    active = bool(names & set(services) or env.get('NODE_OPTIONS') or env.get('SEARCH_WORKER_URL'))
+    if not active:
+        return None
+    if not names <= set(services):
+        raise ValueError('search_service_missing')
+    for name, expected in EXPECTED['services'].items():
+        value = json.loads(json.dumps(services[name]))
+        for key in ('image','pull_policy'): value.pop(key, None)
+        if name == 'searxng':
+            private = value.get('environment') or {}
+            if sorted(private) != EXPECTED['searx_secret_keys'] or any(not v for v in private.values()):
+                raise ValueError('search_secret_contract')
+            value['environment'] = {k:'<private>' for k in private}
+        if value != expected:
+            raise ValueError('search_service_drift')
+    for name, expected in EXPECTED['networks'].items():
+        if config.get('networks',{}).get(name) != expected:
+            raise ValueError('search_network_drift')
+    for key in ('volumes','networks'):
+        if api.get(key) != EXPECTED['api'][key]:
+            raise ValueError('search_api_drift')
+    selected = {k:v for k,v in env.items() if k.startswith(('SEARCH_','SEARXNG_')) or k=='NODE_OPTIONS'}
+    if selected != EXPECTED['api']['environment']:
+        raise ValueError('search_environment_drift')
+    if check_files:
+        for name, expected in EXPECTED['files'].items():
+            p = Path(name)
+            if any(v.is_symlink() for v in (p,*p.parents)) or not p.is_file():
+                raise ValueError('search_file_unavailable')
+            if hashlib.sha256(p.read_bytes()).hexdigest() != expected:
+                raise ValueError('search_file_drift')
+    return EXPECTED['files'].copy()
+
+
+def search_image_overlay(path):
+    # Exactly one historical API pin. It grants no permission for other overlays.
+    path = Path(path)
+    if path != Path.cwd()/'docker-compose.search-image.json': return False
+    if any(v.is_symlink() for v in (path,*path.parents)): return False
+    value = json.loads(path.read_bytes())
+    if set(value) != {'services'} or set(value['services']) != {'api'}: return False
+    entry = value['services']['api']
+    return (set(entry) <= {'image','pull_policy'} and entry.get('pull_policy','never') == 'never'
+            and re.fullmatch(r'sha256:[a-f0-9]{64}',entry.get('image','')) is not None)
+# END SEARCH CONTRACT
 config=json.loads(subprocess.check_output(['docker','compose','config','--format','json'],timeout=30))
+if search_contract(config) != report.get('search_files'): raise SystemExit('Search contract changed')
 for service in config['services'].values(): service.pop('build',None)
 if hashlib.sha256(json.dumps(config,sort_keys=True,separators=(',',':')).encode()).hexdigest()!=report['runtime_config_sha256']: raise SystemExit('Candidate runtime configuration changed')
 images=json.loads((root/'images.json').read_text())
 if images!={'services':report['images']}: raise SystemExit('Candidate image manifest changed')
 previous=json.loads((Path(sys.argv[6])/'compose-images.json').read_text())['services']
-for name in ('nuq-postgres','playwright-service'):
+for name in ('nuq-postgres','playwright-service') + (('searxng','search-egress') if report.get('search_files') else ()):
     if name not in previous or previous[name] != images['services'].get(name):
         raise SystemExit('Protected recovery image changed before cutover')
 package_check=report.get('package_check')
@@ -728,6 +862,13 @@ def baseline_files(paths):
                      and overlay.name == 'core-candidate.json')
                  or (overlay.parent.parent == security and re.fullmatch(r'run-[0-9a-f]{32}', overlay.parent.name)
                      and re.fullmatch(r'firecrawl-(?:candidate|recovery)\.json', overlay.name)))
+        if not known and overlay == Path.cwd()/'docker-compose.search-image.json':
+            namespace = {}
+            exec('"""Frozen reviewed search runtime; embedded into the standalone updater.\n\nChanging executable mounts or isolation requires source review and requalification.\nImage IDs are deployment inputs and are verified separately, never learned here.\n"""\nimport hashlib\nimport json\nfrom pathlib import Path\nimport re\n\nEXPECTED = {\'services\': {\'search-worker\': {\'restart\': \'unless-stopped\', \'cap_drop\': [\'ALL\'], \'cpus\': 1, \'command\': [\'--require\', \'/app/searxng-timeout.cjs\', \'/app/search-worker.cjs\'], \'dns\': [\'127.0.0.1\'], \'entrypoint\': [\'node\'], \'environment\': {\'SEARCH_TRACE\': \'1\', \'SEARCH_WORKER_ROLE\': \'1\', \'SEARXNG_CATEGORIES\': \'general\', \'SEARXNG_ENDPOINT\': \'http://searxng:8080\', \'SEARXNG_ENGINES\': \'brave,yahoo\', \'USE_DB_AUTHENTICATION\': \'false\'}, \'mem_limit\': \'536870912\', \'networks\': {\'search\': {\'ipv4_address\': \'172.30.247.20\'}}, \'read_only\': True, \'security_opt\': [\'no-new-privileges:true\'], \'tmpfs\': [\'/tmp:rw,noexec,nosuid,size=32m\'], \'user\': \'1000:1000\', \'volumes\': [{\'type\': \'bind\', \'source\': \'/opt/firecrawl-search/searxng-timeout.cjs\', \'target\': \'/app/searxng-timeout.cjs\', \'read_only\': True, \'bind\': {}}, {\'type\': \'bind\', \'source\': \'/opt/firecrawl-search/search-deadline.cjs\', \'target\': \'/app/search-deadline.cjs\', \'read_only\': True, \'bind\': {}}, {\'type\': \'bind\', \'source\': \'/opt/firecrawl-search/search-worker.cjs\', \'target\': \'/app/search-worker.cjs\', \'read_only\': True, \'bind\': {}}], \'working_dir\': \'/app\', \'expose\': [\'8081\']}, \'search-egress\': {\'restart\': \'unless-stopped\', \'cap_drop\': [\'ALL\'], \'cpus\': 1, \'command\': [], \'entrypoint\': [\'python3\', \'-I\', \'-B\', \'/app/search_egress.py\'], \'mem_limit\': \'134217728\', \'networks\': {\'search\': {\'ipv4_address\': \'172.30.247.40\'}, \'search_egress\': {\'gw_priority\': 1, \'ipv4_address\': \'172.30.248.2\'}}, \'read_only\': True, \'security_opt\': [\'no-new-privileges:true\'], \'tmpfs\': [\'/tmp:rw,noexec,nosuid,size=32m\'], \'user\': \'65534:65534\', \'volumes\': [{\'type\': \'bind\', \'source\': \'/opt/firecrawl-search/search_egress.py\', \'target\': \'/app/search_egress.py\', \'read_only\': True, \'bind\': {}}], \'working_dir\': \'/app\', \'expose\': [\'3128\']}, \'searxng\': {\'restart\': \'unless-stopped\', \'cap_drop\': [\'ALL\'], \'cpus\': 1, \'command\': None, \'dns\': [\'127.0.0.1\'], \'entrypoint\': None, \'environment\': {\'SEARXNG_SECRET\': \'<private>\'}, \'mem_limit\': \'536870912\', \'networks\': {\'search\': {\'ipv4_address\': \'172.30.247.30\'}}, \'security_opt\': [\'no-new-privileges:true\'], \'volumes\': [{\'type\': \'bind\', \'source\': \'/opt/firecrawl-search/settings.yml\', \'target\': \'/etc/searxng/settings.yml\', \'read_only\': True, \'bind\': {}}], \'expose\': [\'8080\'], \'healthcheck\': {\'test\': [\'CMD\', \'wget\', \'-q\', \'-O\', \'/dev/null\', \'http://127.0.0.1:8080/healthz\'], \'timeout\': \'5s\', \'interval\': \'30s\', \'retries\': 3}}}, \'networks\': {\'search\': {\'name\': \'firecrawl_search\', \'driver\': \'bridge\', \'driver_opts\': {\'com.docker.network.bridge.name\': \'br-fc-search\'}, \'ipam\': {\'config\': [{\'subnet\': \'172.30.247.0/24\'}]}, \'internal\': True, \'enable_ipv6\': False}, \'search_egress\': {\'name\': \'firecrawl_search_egress\', \'driver\': \'bridge\', \'driver_opts\': {\'com.docker.network.bridge.name\': \'br-fc-egress\'}, \'ipam\': {\'config\': [{\'subnet\': \'172.30.248.0/24\'}]}, \'enable_ipv6\': False}}, \'api\': {\'volumes\': [{\'type\': \'volume\', \'source\': \'fdb-cluster-file\', \'target\': \'/var/fdb\', \'read_only\': True, \'volume\': {}}, {\'type\': \'bind\', \'source\': \'/opt/firecrawl-search/searxng-timeout.cjs\', \'target\': \'/app/searxng-timeout.cjs\', \'read_only\': True, \'bind\': {}}, {\'type\': \'bind\', \'source\': \'/opt/firecrawl-search/search-deadline.cjs\', \'target\': \'/app/search-deadline.cjs\', \'read_only\': True, \'bind\': {}}], \'networks\': {\'backend\': None, \'search\': {\'ipv4_address\': \'172.30.247.10\'}}, \'environment\': {\'NODE_OPTIONS\': \'--require=/app/searxng-timeout.cjs\', \'SEARCH_TRACE\': \'1\', \'SEARCH_WORKER_URL\': \'http://search-worker:8081/v2/search\', \'SEARXNG_CATEGORIES\': \'general\', \'SEARXNG_ENDPOINT\': \'http://searxng:8080\', \'SEARXNG_ENGINES\': \'brave,yahoo\'}}, \'searx_secret_keys\': [\'SEARXNG_SECRET\'], \'files\': {\'/opt/firecrawl-search/isolation.nft\': \'6aec975f4633df6ac9c37c5d57ecb2a77ca723052351248476dd9c8c45c7878e\', \'/opt/firecrawl-search/searxng-timeout.cjs\': \'cd817b3dc902cab028d931b8eef49c6b0b806c3886773a42b37b54fba41516e0\', \'/opt/firecrawl-search/search_egress.py\': \'76cbe7ddf85c92d241df6c3e5864d5c8a7e1cade9137e15ef4b13a257763d9cb\', \'/opt/firecrawl-search/settings.yml\': \'25b2bf490f0db087a9df14e77da1d09c8f17b8ae0982ac50726d164bb4a41179\', \'/opt/firecrawl-search/search-worker.cjs\': \'7cfa7550402f39a20a3dcbee2aae1c72033d4185dd06bd995a212acfd40f4da6\', \'/opt/firecrawl-search/search-deadline.cjs\': \'b10e175c301d990c177ebd67794dea2face560bf3dd5fa208a8970e7ce37705a\'}}\n\n\ndef search_contract(config, check_files=True):\n    services = config[\'services\']\n    names = set(EXPECTED[\'services\'])\n    api = services[\'api\']\n    env = api.get(\'environment\') or {}\n    active = bool(names & set(services) or env.get(\'NODE_OPTIONS\') or env.get(\'SEARCH_WORKER_URL\'))\n    if not active:\n        return None\n    if not names <= set(services):\n        raise ValueError(\'search_service_missing\')\n    for name, expected in EXPECTED[\'services\'].items():\n        value = json.loads(json.dumps(services[name]))\n        for key in (\'image\',\'pull_policy\'): value.pop(key, None)\n        if name == \'searxng\':\n            private = value.get(\'environment\') or {}\n            if sorted(private) != EXPECTED[\'searx_secret_keys\'] or any(not v for v in private.values()):\n                raise ValueError(\'search_secret_contract\')\n            value[\'environment\'] = {k:\'<private>\' for k in private}\n        if value != expected:\n            raise ValueError(\'search_service_drift\')\n    for name, expected in EXPECTED[\'networks\'].items():\n        if config.get(\'networks\',{}).get(name) != expected:\n            raise ValueError(\'search_network_drift\')\n    for key in (\'volumes\',\'networks\'):\n        if api.get(key) != EXPECTED[\'api\'][key]:\n            raise ValueError(\'search_api_drift\')\n    selected = {k:v for k,v in env.items() if k.startswith((\'SEARCH_\',\'SEARXNG_\')) or k==\'NODE_OPTIONS\'}\n    if selected != EXPECTED[\'api\'][\'environment\']:\n        raise ValueError(\'search_environment_drift\')\n    if check_files:\n        for name, expected in EXPECTED[\'files\'].items():\n            p = Path(name)\n            if any(v.is_symlink() for v in (p,*p.parents)) or not p.is_file():\n                raise ValueError(\'search_file_unavailable\')\n            if hashlib.sha256(p.read_bytes()).hexdigest() != expected:\n                raise ValueError(\'search_file_drift\')\n    return EXPECTED[\'files\'].copy()\n\n\ndef search_image_overlay(path):\n    # Exactly one historical API pin. It grants no permission for other overlays.\n    path = Path(path)\n    if path != Path.cwd()/\'docker-compose.search-image.json\': return False\n    if any(v.is_symlink() for v in (path,*path.parents)): return False\n    value = json.loads(path.read_bytes())\n    if set(value) != {\'services\'} or set(value[\'services\']) != {\'api\'}: return False\n    entry = value[\'services\'][\'api\']\n    return (set(entry) <= {\'image\',\'pull_policy\'} and entry.get(\'pull_policy\',\'never\') == \'never\'\n            and re.fullmatch(r\'sha256:[a-f0-9]{64}\',entry.get(\'image\',\'\')) is not None)\n', namespace)
+            known = namespace['search_image_overlay'](overlay)
+            if known:
+                config = json.loads(subprocess.check_output(['docker','compose','config','--format','json'],timeout=30))
+                namespace['search_contract'](config)
         if not known or any(p.is_symlink() for p in (overlay, *overlay.parents)):
             raise SystemExit('Unsupported Compose image overlay')
         value = json.loads(overlay.read_bytes())
@@ -863,7 +1004,7 @@ failure_notice() {
 # Candidate receipts, single-use approvals, retention and the Owner notice.
 # Caller holds run.lock for every mutating subcommand.
 gate() {
-  FIRECRAWL_NOTICE_REPO=$notice_repo FIRECRAWL_NOTICE_OWNER=$notice_owner python3 -B - "$@" <<'PYGATE'
+  UPDATER_SCRIPT=${BASH_SOURCE[0]} FIRECRAWL_NOTICE_REPO=$notice_repo FIRECRAWL_NOTICE_OWNER=$notice_owner python3 -B - "$@" <<'PYGATE'
 import datetime as dt, hashlib, json, os, re, secrets, subprocess, sys
 from pathlib import Path
 
@@ -950,7 +1091,7 @@ def binding(value):
     return result
 
 def blocked_key(repo, tag, commit, guard):
-    inputs = [tag, commit, guard]
+    inputs = [tag, commit, guard, sha(Path(os.environ.get('UPDATER_SCRIPT', __file__)).read_bytes())]
     for name in ('.env', 'docker-compose.override.yaml'):
         path = Path(repo) / name
         inputs.append(sha(path.read_bytes()) if path.is_file() else '-')
@@ -1180,6 +1321,10 @@ elif command == 'config':
     except (Exception, SystemExit) as error:
         if isinstance(error, SystemExit) and error.code == 3: raise
         print('candidate configuration check unavailable', file=sys.stderr); sys.exit(4)
+    namespace = {}
+    exec('"""Frozen reviewed search runtime; embedded into the standalone updater.\n\nChanging executable mounts or isolation requires source review and requalification.\nImage IDs are deployment inputs and are verified separately, never learned here.\n"""\nimport hashlib\nimport json\nfrom pathlib import Path\nimport re\n\nEXPECTED = {\'services\': {\'search-worker\': {\'restart\': \'unless-stopped\', \'cap_drop\': [\'ALL\'], \'cpus\': 1, \'command\': [\'--require\', \'/app/searxng-timeout.cjs\', \'/app/search-worker.cjs\'], \'dns\': [\'127.0.0.1\'], \'entrypoint\': [\'node\'], \'environment\': {\'SEARCH_TRACE\': \'1\', \'SEARCH_WORKER_ROLE\': \'1\', \'SEARXNG_CATEGORIES\': \'general\', \'SEARXNG_ENDPOINT\': \'http://searxng:8080\', \'SEARXNG_ENGINES\': \'brave,yahoo\', \'USE_DB_AUTHENTICATION\': \'false\'}, \'mem_limit\': \'536870912\', \'networks\': {\'search\': {\'ipv4_address\': \'172.30.247.20\'}}, \'read_only\': True, \'security_opt\': [\'no-new-privileges:true\'], \'tmpfs\': [\'/tmp:rw,noexec,nosuid,size=32m\'], \'user\': \'1000:1000\', \'volumes\': [{\'type\': \'bind\', \'source\': \'/opt/firecrawl-search/searxng-timeout.cjs\', \'target\': \'/app/searxng-timeout.cjs\', \'read_only\': True, \'bind\': {}}, {\'type\': \'bind\', \'source\': \'/opt/firecrawl-search/search-deadline.cjs\', \'target\': \'/app/search-deadline.cjs\', \'read_only\': True, \'bind\': {}}, {\'type\': \'bind\', \'source\': \'/opt/firecrawl-search/search-worker.cjs\', \'target\': \'/app/search-worker.cjs\', \'read_only\': True, \'bind\': {}}], \'working_dir\': \'/app\', \'expose\': [\'8081\']}, \'search-egress\': {\'restart\': \'unless-stopped\', \'cap_drop\': [\'ALL\'], \'cpus\': 1, \'command\': [], \'entrypoint\': [\'python3\', \'-I\', \'-B\', \'/app/search_egress.py\'], \'mem_limit\': \'134217728\', \'networks\': {\'search\': {\'ipv4_address\': \'172.30.247.40\'}, \'search_egress\': {\'gw_priority\': 1, \'ipv4_address\': \'172.30.248.2\'}}, \'read_only\': True, \'security_opt\': [\'no-new-privileges:true\'], \'tmpfs\': [\'/tmp:rw,noexec,nosuid,size=32m\'], \'user\': \'65534:65534\', \'volumes\': [{\'type\': \'bind\', \'source\': \'/opt/firecrawl-search/search_egress.py\', \'target\': \'/app/search_egress.py\', \'read_only\': True, \'bind\': {}}], \'working_dir\': \'/app\', \'expose\': [\'3128\']}, \'searxng\': {\'restart\': \'unless-stopped\', \'cap_drop\': [\'ALL\'], \'cpus\': 1, \'command\': None, \'dns\': [\'127.0.0.1\'], \'entrypoint\': None, \'environment\': {\'SEARXNG_SECRET\': \'<private>\'}, \'mem_limit\': \'536870912\', \'networks\': {\'search\': {\'ipv4_address\': \'172.30.247.30\'}}, \'security_opt\': [\'no-new-privileges:true\'], \'volumes\': [{\'type\': \'bind\', \'source\': \'/opt/firecrawl-search/settings.yml\', \'target\': \'/etc/searxng/settings.yml\', \'read_only\': True, \'bind\': {}}], \'expose\': [\'8080\'], \'healthcheck\': {\'test\': [\'CMD\', \'wget\', \'-q\', \'-O\', \'/dev/null\', \'http://127.0.0.1:8080/healthz\'], \'timeout\': \'5s\', \'interval\': \'30s\', \'retries\': 3}}}, \'networks\': {\'search\': {\'name\': \'firecrawl_search\', \'driver\': \'bridge\', \'driver_opts\': {\'com.docker.network.bridge.name\': \'br-fc-search\'}, \'ipam\': {\'config\': [{\'subnet\': \'172.30.247.0/24\'}]}, \'internal\': True, \'enable_ipv6\': False}, \'search_egress\': {\'name\': \'firecrawl_search_egress\', \'driver\': \'bridge\', \'driver_opts\': {\'com.docker.network.bridge.name\': \'br-fc-egress\'}, \'ipam\': {\'config\': [{\'subnet\': \'172.30.248.0/24\'}]}, \'enable_ipv6\': False}}, \'api\': {\'volumes\': [{\'type\': \'volume\', \'source\': \'fdb-cluster-file\', \'target\': \'/var/fdb\', \'read_only\': True, \'volume\': {}}, {\'type\': \'bind\', \'source\': \'/opt/firecrawl-search/searxng-timeout.cjs\', \'target\': \'/app/searxng-timeout.cjs\', \'read_only\': True, \'bind\': {}}, {\'type\': \'bind\', \'source\': \'/opt/firecrawl-search/search-deadline.cjs\', \'target\': \'/app/search-deadline.cjs\', \'read_only\': True, \'bind\': {}}], \'networks\': {\'backend\': None, \'search\': {\'ipv4_address\': \'172.30.247.10\'}}, \'environment\': {\'NODE_OPTIONS\': \'--require=/app/searxng-timeout.cjs\', \'SEARCH_TRACE\': \'1\', \'SEARCH_WORKER_URL\': \'http://search-worker:8081/v2/search\', \'SEARXNG_CATEGORIES\': \'general\', \'SEARXNG_ENDPOINT\': \'http://searxng:8080\', \'SEARXNG_ENGINES\': \'brave,yahoo\'}}, \'searx_secret_keys\': [\'SEARXNG_SECRET\'], \'files\': {\'/opt/firecrawl-search/isolation.nft\': \'6aec975f4633df6ac9c37c5d57ecb2a77ca723052351248476dd9c8c45c7878e\', \'/opt/firecrawl-search/searxng-timeout.cjs\': \'cd817b3dc902cab028d931b8eef49c6b0b806c3886773a42b37b54fba41516e0\', \'/opt/firecrawl-search/search_egress.py\': \'76cbe7ddf85c92d241df6c3e5864d5c8a7e1cade9137e15ef4b13a257763d9cb\', \'/opt/firecrawl-search/settings.yml\': \'25b2bf490f0db087a9df14e77da1d09c8f17b8ae0982ac50726d164bb4a41179\', \'/opt/firecrawl-search/search-worker.cjs\': \'7cfa7550402f39a20a3dcbee2aae1c72033d4185dd06bd995a212acfd40f4da6\', \'/opt/firecrawl-search/search-deadline.cjs\': \'b10e175c301d990c177ebd67794dea2face560bf3dd5fa208a8970e7ce37705a\'}}\n\n\ndef search_contract(config, check_files=True):\n    services = config[\'services\']\n    names = set(EXPECTED[\'services\'])\n    api = services[\'api\']\n    env = api.get(\'environment\') or {}\n    active = bool(names & set(services) or env.get(\'NODE_OPTIONS\') or env.get(\'SEARCH_WORKER_URL\'))\n    if not active:\n        return None\n    if not names <= set(services):\n        raise ValueError(\'search_service_missing\')\n    for name, expected in EXPECTED[\'services\'].items():\n        value = json.loads(json.dumps(services[name]))\n        for key in (\'image\',\'pull_policy\'): value.pop(key, None)\n        if name == \'searxng\':\n            private = value.get(\'environment\') or {}\n            if sorted(private) != EXPECTED[\'searx_secret_keys\'] or any(not v for v in private.values()):\n                raise ValueError(\'search_secret_contract\')\n            value[\'environment\'] = {k:\'<private>\' for k in private}\n        if value != expected:\n            raise ValueError(\'search_service_drift\')\n    for name, expected in EXPECTED[\'networks\'].items():\n        if config.get(\'networks\',{}).get(name) != expected:\n            raise ValueError(\'search_network_drift\')\n    for key in (\'volumes\',\'networks\'):\n        if api.get(key) != EXPECTED[\'api\'][key]:\n            raise ValueError(\'search_api_drift\')\n    selected = {k:v for k,v in env.items() if k.startswith((\'SEARCH_\',\'SEARXNG_\')) or k==\'NODE_OPTIONS\'}\n    if selected != EXPECTED[\'api\'][\'environment\']:\n        raise ValueError(\'search_environment_drift\')\n    if check_files:\n        for name, expected in EXPECTED[\'files\'].items():\n            p = Path(name)\n            if any(v.is_symlink() for v in (p,*p.parents)) or not p.is_file():\n                raise ValueError(\'search_file_unavailable\')\n            if hashlib.sha256(p.read_bytes()).hexdigest() != expected:\n                raise ValueError(\'search_file_drift\')\n    return EXPECTED[\'files\'].copy()\n\n\ndef search_image_overlay(path):\n    # Exactly one historical API pin. It grants no permission for other overlays.\n    path = Path(path)\n    if path != Path.cwd()/\'docker-compose.search-image.json\': return False\n    if any(v.is_symlink() for v in (path,*path.parents)): return False\n    value = json.loads(path.read_bytes())\n    if set(value) != {\'services\'} or set(value[\'services\']) != {\'api\'}: return False\n    entry = value[\'services\'][\'api\']\n    return (set(entry) <= {\'image\',\'pull_policy\'} and entry.get(\'pull_policy\',\'never\') == \'never\'\n            and re.fullmatch(r\'sha256:[a-f0-9]{64}\',entry.get(\'image\',\'\')) is not None)\n', namespace)
+    try: namespace['search_contract'](config)
+    except (ValueError, OSError): sys.exit(1)
     sys.exit(0 if current == value['runtime_config_sha256'] else 1)
 elif command == 'block':
     repo, tag, commit, guard, evidence, candidate_dir, base_image = args
