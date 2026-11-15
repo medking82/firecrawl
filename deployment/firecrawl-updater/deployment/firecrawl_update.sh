@@ -8,7 +8,7 @@ umask 077
 repo=${FIRECRAWL_REPO:-/home/marck/github/firecrawl}
 canonical_state_dir=/home/marck/.local/state/firecrawl-updater
 state_dir=${FIRECRAWL_UPDATE_STATE_DIR:-$canonical_state_dir}
-guard_sha256=370df5cee373afee330a158cfea4056173268a08e0b301e5f0eaea2a00564bf5
+guard_sha256=12e4fee3a0e86a01d7c1c6485cc997ea8be59378a46e0f2cb4327071d54263a9
 guard_file="$canonical_state_dir/guards/$guard_sha256.py"
 worktree_root=${FIRECRAWL_WORKTREE_ROOT:-/home/marck/github/worktrees/firecrawl}
 security_refresh=${FIRECRAWL_SECURITY_REFRESH:-/home/marck/.local/lib/firecrawl-security-refresh/deployment/self-hosted-auto/security_refresh.py}
@@ -326,8 +326,10 @@ prepare_candidate() {
   fi
   # Fixed project identity keeps the rendered non-build configuration comparable.
   # Build changes only local image tags; the running containers keep exact IDs.
-  docker compose --project-name firecrawl --env-file "$repo/.env" \
-    -f "$candidate_dir/docker-compose.yaml" -f "$repo/docker-compose.override.yaml" build --build-arg "GIT_SHA=$latest_commit"
+  if [[ -z "${FIRECRAWL_CANDIDATE_ARTIFACT:-}" ]]; then
+    docker compose --project-name firecrawl --env-file "$repo/.env" \
+      -f "$candidate_dir/docker-compose.yaml" -f "$repo/docker-compose.override.yaml" build --build-arg "GIT_SHA=$latest_commit"
+  fi
   [[ "$(git -C "$candidate_dir" rev-parse HEAD)" == "$latest_commit" && -z "$(git -C "$candidate_dir" status --porcelain)" ]] || return 1
   # Private build context contains only reviewed, embedded patch inputs. The base
   # is the immutable ID of the just-built candidate, never a mutable tag.
@@ -504,6 +506,48 @@ packages:
     resolution: {integrity: sha512-SF8DBQx3ypa8zDqZlezpHQ6M2g7TrqSEWpAtC4OsHCdLmi7J2WdxaSbA8/DJyEn2l/CHPrW0VFenoqoDccrw6g==}
 snapshots:
 PATCH_LOCK
+  if [[ -n "${FIRECRAWL_CANDIDATE_ARTIFACT:-}" ]]; then
+    local artifact_fields
+    artifact_fields=$(python3 -B - "$FIRECRAWL_CANDIDATE_ARTIFACT" "${FIRECRAWL_CANDIDATE_ARTIFACT_SHA256:-}" "$latest_tag" "$latest_commit" "$guard_sha256" "$patch_context" <<'PYARTIFACT'
+import hashlib, json, os, re, stat, subprocess, sys
+from pathlib import Path
+path, expected, tag, commit, guard, context = sys.argv[1:]
+p = Path(path)
+if not re.fullmatch('[a-f0-9]{64}', expected) or any(v.is_symlink() for v in (p,*p.parents)):
+    raise SystemExit('Invalid artifact descriptor boundary')
+info = p.stat()
+if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1:
+    raise SystemExit('Unsafe artifact descriptor')
+raw = p.read_bytes()
+if len(raw) > 16384 or hashlib.sha256(raw).hexdigest() != expected:
+    raise SystemExit('Artifact descriptor digest mismatch')
+a = json.loads(raw)
+if (a.get('schema'),a.get('tag'),a.get('commit'),a.get('guard_sha256')) != (1,tag,commit,guard):
+    raise SystemExit('Artifact qualification binding mismatch')
+if a.get('qualification_exit') != 0 or a.get('qualification_host') != 'PC WSL Ubuntu-26.04':
+    raise SystemExit('Artifact qualification missing')
+patches = {v.name:hashlib.sha256(v.read_bytes()).hexdigest() for v in Path(context).iterdir()}
+if a.get('patch_inputs') != patches:
+    raise SystemExit('Artifact patch inputs changed')
+for key in ('base_image','patched_image'):
+    image = a.get(key,'')
+    if not re.fullmatch(r'sha256:[a-f0-9]{64}',image):
+        raise SystemExit('Immutable artifact image required')
+    value = json.loads(subprocess.check_output(['docker','image','inspect',image],timeout=30))[0]
+    env = dict(v.split('=',1) for v in value['Config'].get('Env',[]) if '=' in v)
+    if value['Id'] != image or env.get('FIRECRAWL_BUILD_SHA') != commit:
+        raise SystemExit('Artifact source/image identity mismatch')
+    print(image)
+PYARTIFACT
+    )
+    local -a artifact_images
+    mapfile -t artifact_images <<<"$artifact_fields"
+    [[ "${#artifact_images[@]}" -eq 2 ]] || return 1
+    base_image=${artifact_images[0]} patched_image=${artifact_images[1]}
+    printf '%s' "$patched_image" >"$candidate_evidence/patched-iid"
+    cp "$FIRECRAWL_CANDIDATE_ARTIFACT" "$candidate_evidence/artifact.json"
+    log "using WSL-qualified image artifact; no host build"
+  else
   base_image=$(python3 -B - "$candidate_dir" "$repo" "$latest_commit" <<'PYBASE'
 import json, re, subprocess, sys
 source, repo, commit = sys.argv[1:]
@@ -531,6 +575,8 @@ PYBASE
   docker image rm "$base_tag" >/dev/null
   candidate_base_image=$base_image
   patched_image=$(cat "$candidate_evidence/patched-iid")
+  fi
+  candidate_base_image=$base_image
   [[ "$patched_image" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
   # Verify the resulting filesystem ancestry and inherited runtime metadata;
   # a tag race or a different resolved base must never reach admission.
@@ -1457,6 +1503,10 @@ cutover_candidate() {
   exec 8>&- 9>&-
   local security="security refresh failed; core cutover stands" attempt
   # The per-minute recovery timer can hold the owner lock briefly.
+  if [[ "${FIRECRAWL_SKIP_SECURITY_REFRESH:-0}" == 1 ]]; then
+    security="security refresh deferred explicitly; existing timer retained"
+    log "$security"
+  else
   for attempt in 1 2 3; do
     if timeout 100m python3 -B "$security_refresh"; then
       security="security refresh passed"
@@ -1466,6 +1516,7 @@ cutover_candidate() {
   done
   [[ "$security" == "security refresh passed" ]] ||
     log "post-cutover security refresh failed; inspect $security_journals/latest.json"
+  fi
   gate notify "$state_dir" deployed "$latest_tag" "$latest_commit" "$candidate_evidence" \
     "${previous_tag:-$previous_commit}" "$security" || log "upgrade notice not delivered"
 }

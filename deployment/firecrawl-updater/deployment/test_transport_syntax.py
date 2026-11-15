@@ -56,6 +56,56 @@ class SyntaxAdmissionTests(unittest.TestCase):
         self.assertEqual(result['fingerprint_match'], 'syntax')
         self.assertEqual(result['syntax_hashes_checked'], len(self.profile['syntax_hashes']))
 
+    def test_shared_transport_bytes_can_select_a_complete_new_config_profile(self):
+        # Releases can share transport bytes while their guarded config differs.
+        older = copy.deepcopy(self.profile)
+        newer = copy.deepcopy(self.profile)
+        config = '/app/dist/src/config.js'
+        older['syntax_hashes'][config] = '1' * 64
+        newer['syntax_hashes'][config] = '2' * 64
+        self.probe['hashes'] = copy.deepcopy(older['hashes'])
+        self.syntax = {'syntax_hashes': copy.deepcopy(newer['syntax_hashes'])}
+        def response(args, stage, deadline):
+            if args[1] == 'inspect': return copy.deepcopy(self.container)
+            if 'syntax_hashes' in args[-1]: return copy.deepcopy(self.syntax)
+            if 'undici_lib_sha256' in args[-1]:
+                return {'undici_lib_sha256': newer['undici_lib_sha256'], 'file_count': 116}
+            return copy.deepcopy(self.probe)
+        with patch.object(guard, 'TRANSPORT_PROFILES', {'older': older, 'newer': newer}), \
+                patch.object(guard, 'run_json', side_effect=response):
+            result = guard.verify()
+            self.assertTrue(result['verified'], result)
+            self.assertEqual(result['transport_profile'], 'newer')
+            # Neither an unknown config nor a hybrid of two reviewed programs passes.
+            self.syntax['syntax_hashes'][config] = '3' * 64
+            self.assertFalse(guard.verify()['verified'])
+            self.syntax['syntax_hashes'][config] = '2' * 64
+            self.syntax['syntax_hashes']['/app/dist/src/lib/reserved-capacity.js'] = '4' * 64
+            self.assertFalse(guard.verify()['verified'])
+
+    def test_new_optional_transports_are_disabled_for_every_profile(self):
+        for key in ('FRESH_FEED_URL_nonempty', 'PUBSUB_PROJECT_ID_nonempty',
+                    'VERTEX_USE_ADC_nonempty'):
+            self.assertIs(guard.EXPECTED_PREDICATES[key], False)
+            self.probe['predicates'][key] = True
+            self.assertFalse(self.verify()['verified'], key)
+            self.probe['predicates'][key] = False
+
+    def test_new_receipt_and_profile_have_identical_frozen_fields(self):
+        import hashlib
+        path = PATH.with_name('firecrawl-transport-20261115-v743.json')
+        data = json.loads(path.read_text())
+        profile = guard.TRANSPORT_PROFILES['v2.11.743']
+        self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), profile['receipt_sha256'])
+        for key in ('hashes', 'dependencies', 'syntax_hashes', 'undici_lib_sha256',
+                    'just_bash_tree_sha256'):
+            self.assertEqual(data[key], profile[key], key)
+        baseline = guard.TRANSPORT_PROFILES['v2.11.735']
+        self.assertEqual(data['hashes'], baseline['hashes'])
+        self.assertEqual([key for key in data['syntax_hashes']
+                          if data['syntax_hashes'][key] != baseline['syntax_hashes'][key]],
+                         ['/app/dist/src/config.js'])
+
     def test_changed_executable_code_rejected(self):
         self.syntax['syntax_hashes'][next(iter(self.profile['hashes']))] = 'f' * 64
         self.assertFalse(self.verify()['verified'])
