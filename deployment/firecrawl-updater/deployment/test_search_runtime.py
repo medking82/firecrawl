@@ -75,4 +75,62 @@ class SearchRuntime(unittest.TestCase):
         for block in blocks:self.assertEqual(block.split('# END SEARCH CONTRACT',1)[0],source)
 
 
+class SearchCandidateIntegration(unittest.TestCase):
+    """Exercise the complete candidate/manifest gate with a frozen search fixture."""
+    def setUp(self):
+        from deployment import test_firecrawl_candidate as candidate
+        self.candidate_module = candidate
+        self.helper = candidate.CandidateTests('test_exact_reviewed_profile_pins_images_only_after_recheck')
+        self.helper.setUp()
+        self.addCleanup(self.helper.doCleanups)
+        self.helper.config['services'].update(config()['services'])
+        self.helper.config['services']['api']['environment'].update(
+            USE_DB_AUTHENTICATION='false', PLAYWRIGHT_MICROSERVICE_URL='http://fixture')
+        self.helper.config['networks'] = copy.deepcopy(EXPECTED['networks'])
+        docker = self.helper.root/'docker'
+        source = docker.read_text()
+        source = source.replace(
+            "('firecrawl-nuq-postgres-1','firecrawl-playwright-service-1')",
+            "('firecrawl-nuq-postgres-1','firecrawl-playwright-service-1','firecrawl-searxng-1','firecrawl-search-egress-1')")
+        source = source.replace(
+            "name='nuq-postgres' if args[-1]=='firecrawl-nuq-postgres-1' else 'playwright-service'",
+            "name=args[-1][len('firecrawl-'):-len('-1')]")
+        docker.write_text(source)
+        # Only map fixture filesystem locations; production embedded code is unchanged.
+        payload = self.helper.root/'reviewed-search-file'
+        payload.write_bytes(b'reviewed-search-fixture')
+        self.fixture_files = {str(payload):hashlib.sha256(payload.read_bytes()).hexdigest()}
+        original = candidate.embedded
+        def fixture_embedded(marker):
+            code = original(marker)
+            return code.replace('# END SEARCH CONTRACT',
+                'EXPECTED["files"] = '+repr(self.fixture_files)+'\n# END SEARCH CONTRACT')
+        patcher = patch.object(candidate, 'embedded', fixture_embedded)
+        patcher.start();self.addCleanup(patcher.stop)
+
+    def test_search_overlay_and_preload_admitted_and_all_images_pinned(self):
+        result = self.helper.candidate()
+        self.assertEqual(result.returncode,0,result.stderr)
+        report = json.loads((self.helper.evidence/'checks.json').read_text())
+        self.assertEqual(report['status'],'checks_passed')
+        self.assertEqual(report['search_files'],self.fixture_files)
+        self.assertEqual(report['images']['search-worker']['image'],report['images']['api']['image'])
+        preimage = self.helper.preimage/'compose-images.json'
+        frozen = json.loads(preimage.read_text())
+        for name in ('searxng','search-egress'):
+            frozen['services'][name] = report['images'][name]
+        preimage.write_text(json.dumps(frozen))
+        self.assertEqual(self.helper.manifest().returncode,0)
+        manifest = json.loads((self.helper.evidence/'manifest.json').read_text())
+        self.assertTrue({'api','search-worker','search-egress','searxng'} <= set(manifest['images']))
+
+    def test_unknown_search_network_drift_rejected_before_cutover(self):
+        self.helper.config['networks']['search']['internal'] = False
+        self.assertNotEqual(self.helper.candidate().returncode,0)
+        self.assertFalse((self.helper.evidence/'images.json').exists())
+        calls = self.helper.fixture.with_suffix('.calls').read_text()
+        self.assertNotIn('"up"',calls)
+        self.assertNotIn('"build"',calls)
+
+
 if __name__=='__main__':unittest.main()
