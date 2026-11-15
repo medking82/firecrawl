@@ -60,3 +60,52 @@ def search_image_overlay(path):
     entry = value['services']['api']
     return (set(entry) <= {'image','pull_policy'} and entry.get('pull_policy','never') == 'never'
             and re.fullmatch(r'sha256:[a-f0-9]{64}',entry.get('image','')) is not None)
+
+
+def verify_live_transport(guard, config):
+    """Check the frozen preload separately; transport probes run without it."""
+    import subprocess
+    if not search_contract(config):
+        return guard.verify()
+    def inspect(identity):
+        return json.loads(subprocess.check_output(['docker','inspect',identity],timeout=10))[0]
+    before = inspect(guard.CONTAINER)
+    identity = before['Id']
+    if not re.fullmatch(r'[a-f0-9]{64}',identity) or before['State']['Running'] is not True:
+        raise ValueError('search_container_identity')
+    env = dict(v.split('=',1) for v in before['Config']['Env'] if '=' in v)
+    selected = {k:v for k,v in env.items() if k.startswith(('SEARCH_','SEARXNG_')) or k=='NODE_OPTIONS'}
+    if selected != EXPECTED['api']['environment']:
+        raise ValueError('search_live_environment_drift')
+    mounts = before['Mounts']
+    expected = EXPECTED['api']['volumes']
+    if len(mounts) != len(expected):
+        raise ValueError('search_live_mount_drift')
+    for item in expected:
+        matches = [v for v in mounts if v['Destination']==item['target'] and v['Type']==item['type'] and v['RW'] is False]
+        if len(matches)!=1:
+            raise ValueError('search_live_mount_drift')
+        if item['type']=='bind' and matches[0]['Source']!=item['source']:
+            raise ValueError('search_live_mount_drift')
+        if item['type']=='volume' and matches[0].get('Name')!='firecrawl_'+item['source']:
+            raise ValueError('search_live_mount_drift')
+    original, original_container = guard.run_json, guard.CONTAINER
+    def sanitized(arguments, stage, deadline):
+        # Pin every exec to the inspected container, and never start Node with
+        # inherited preload code before its transport probe can run.
+        if arguments[:2]==['docker','exec']:
+            if arguments[2:4]!=[identity,'node']:
+                raise ValueError('search_probe_identity')
+            arguments=arguments[:2]+['-e','NODE_OPTIONS=']+arguments[2:]
+        return original(arguments,stage,deadline)
+    try:
+        guard.CONTAINER=identity
+        guard.run_json=sanitized
+        result=guard.verify()
+        after=inspect(identity)
+        if any(after[k]!=before[k] for k in ('Id','Image','Config','Mounts')) or after['State']['Running'] is not True:
+            raise ValueError('search_live_changed')
+        search_contract(config)
+        return result
+    finally:
+        guard.run_json,guard.CONTAINER=original,original_container

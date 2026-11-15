@@ -6,7 +6,8 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
-from deployment.search_runtime_contract import EXPECTED, search_contract, search_image_overlay
+from deployment.search_runtime_contract import EXPECTED, search_contract, search_image_overlay, verify_live_transport
+from types import SimpleNamespace
 
 
 def config():
@@ -71,8 +72,54 @@ class SearchRuntime(unittest.TestCase):
         source=(root/'search_runtime_contract.py').read_text()
         script=(root/'firecrawl_update.sh').read_text()
         blocks=script.split('# BEGIN SEARCH CONTRACT (generated from search_runtime_contract.py)\n')[1:]
-        self.assertEqual(len(blocks),2)
+        self.assertEqual(len(blocks),3)
         for block in blocks:self.assertEqual(block.split('# END SEARCH CONTRACT',1)[0],source)
+
+    def live_fixture(self):
+        live = {'Id':'a'*64, 'Image':'sha256:'+'b'*64, 'State':{'Running':True},
+                'Config':{'Env':[k+'='+v for k,v in EXPECTED['api']['environment'].items()]},
+                'Mounts':[{'Type':v['type'],'Destination':v['target'],'RW':False,
+                           **({'Source':v['source']} if v['type']=='bind' else {'Name':'firecrawl_'+v['source']})}
+                          for v in EXPECTED['api']['volumes']]}
+        calls=[]
+        def run(args,stage,deadline):
+            calls.append(args)
+            return {'verified':True}
+        guard=SimpleNamespace(CONTAINER='firecrawl-api-1',run_json=run)
+        guard.verify=lambda:guard.run_json(['docker','exec',guard.CONTAINER,'node','-e','probe'],'probe',123)
+        return live,guard,calls
+
+    def test_live_probe_removes_only_preload_and_pins_container(self):
+        live,guard,calls=self.live_fixture(); original=guard.run_json
+        with patch('deployment.search_runtime_contract.search_contract',return_value={'file':'hash'}), \
+             patch('subprocess.check_output',return_value=json.dumps([live]).encode()):
+            self.assertTrue(verify_live_transport(guard,config())['verified'])
+        self.assertEqual(calls,[['docker','exec','-e','NODE_OPTIONS=','a'*64,'node','-e','probe']])
+        self.assertIs(guard.run_json,original)
+        self.assertEqual(guard.CONTAINER,'firecrawl-api-1')
+
+    def test_live_drift_rejected_before_probe(self):
+        for field in ('environment','mount','writable','stopped'):
+            live,guard,calls=self.live_fixture()
+            if field=='environment':live['Config']['Env'].append('SEARCH_UNKNOWN=1')
+            if field=='mount':live['Mounts'][1]['Source']='/tmp/unreviewed'
+            if field=='writable':live['Mounts'][1]['RW']=True
+            if field=='stopped':live['State']['Running']=False
+            with self.subTest(field=field), patch('deployment.search_runtime_contract.search_contract',return_value={'file':'hash'}), \
+                 patch('subprocess.check_output',return_value=json.dumps([live]).encode()):
+                with self.assertRaises(ValueError):verify_live_transport(guard,config())
+            self.assertEqual(calls,[])
+
+    def test_live_identity_change_and_probe_failure_restore_guard(self):
+        for failure in ('changed','probe'):
+            live,guard,calls=self.live_fixture(); original=guard.run_json
+            after=copy.deepcopy(live);after['Image']='sha256:'+'c'*64
+            if failure=='probe':guard.verify=lambda:(_ for _ in ()).throw(ValueError('probe failed'))
+            with patch('deployment.search_runtime_contract.search_contract',return_value={'file':'hash'}), \
+                 patch('subprocess.check_output',side_effect=[json.dumps([live]).encode(),json.dumps([after]).encode()]):
+                with self.assertRaises(ValueError):verify_live_transport(guard,config())
+            self.assertIs(guard.run_json,original)
+            self.assertEqual(guard.CONTAINER,'firecrawl-api-1')
 
 
 class SearchCandidateIntegration(unittest.TestCase):

@@ -103,6 +103,10 @@ class ResearchUpdaterTests(unittest.TestCase):
         body = SOURCE.read_text().split("<<'PYSMOKE'\n", 1)[1].split('\nPYSMOKE', 1)[0]
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); guard = root/'guard.py'
+            docker = root/'docker'
+            docker.write_text('#!/bin/sh\nprintf \'%s\\n\' \'{"services":{"api":{"environment":{}}}}\'\n')
+            docker.chmod(0o700)
+            environment = dict(os.environ, PATH=str(root)+os.pathsep+os.environ['PATH'])
             guard.write_text('def verify():\n    return {"verified": True}\n'); guard.chmod(0o600)
             digest = hashlib.sha256(guard.read_bytes()).hexdigest()
             calls = []
@@ -123,15 +127,15 @@ class ResearchUpdaterTests(unittest.TestCase):
             self.addCleanup(server.server_close); self.addCleanup(server.shutdown)
             endpoint = 'http://127.0.0.1:' + str(server.server_port)
             args = [sys.executable,'-B','-c',body,str(guard),digest,endpoint]
-            result = subprocess.run(args,capture_output=True,text=True,timeout=10)
+            result = subprocess.run(args,capture_output=True,text=True,timeout=10,env=environment)
             self.assertEqual(result.returncode,0,result.stderr)
             self.assertEqual([path for path,_ in calls],['/v2/search','/v2/scrape'])
             self.assertEqual({key:calls[1][1][key] for key in ('fastMode','maxAge','storeInCache')},
                              {'fastMode':True,'maxAge':0,'storeInCache':False})
             guard.write_text('def verify():\n    return {"verified": False}\n')
-            self.assertNotEqual(subprocess.run(args,capture_output=True,text=True,timeout=10).returncode,0)
+            self.assertNotEqual(subprocess.run(args,capture_output=True,text=True,timeout=10,env=environment).returncode,0)
             args[5] = hashlib.sha256(guard.read_bytes()).hexdigest()
-            failure = subprocess.run(args,capture_output=True,text=True,timeout=10)
+            failure = subprocess.run(args,capture_output=True,text=True,timeout=10,env=environment)
             self.assertNotEqual(failure.returncode,0)
             self.assertIn('guard_rejected',failure.stderr)
             self.assertEqual(len(calls),2)
@@ -140,6 +144,10 @@ class ResearchUpdaterTests(unittest.TestCase):
         body = SOURCE.read_text().split("<<'PYSMOKE'\n", 1)[1].split('\nPYSMOKE', 1)[0]
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); guard = root/'guard.py'
+            docker = root/'docker'
+            docker.write_text('#!/bin/sh\nprintf \'%s\\n\' \'{"services":{"api":{"environment":{}}}}\'\n')
+            docker.chmod(0o700)
+            environment = dict(os.environ, PATH=str(root)+os.pathsep+os.environ['PATH'])
             guard.write_text('def verify():\n    return {"verified": True}\n'); guard.chmod(0o600)
             digest = hashlib.sha256(guard.read_bytes()).hexdigest()
             calls = []; blocked = {'searches': 2}
@@ -161,11 +169,11 @@ class ResearchUpdaterTests(unittest.TestCase):
             thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
             self.addCleanup(server.server_close); self.addCleanup(server.shutdown)
             args = [sys.executable,'-B','-c',body,str(guard),digest,'http://127.0.0.1:'+str(server.server_port),'0']
-            result = subprocess.run(args,capture_output=True,text=True,timeout=10)
+            result = subprocess.run(args,capture_output=True,text=True,timeout=10,env=environment)
             self.assertEqual(result.returncode,0,result.stderr)
             self.assertEqual(calls,['/v2/search']*3+['/v2/scrape'])
             calls.clear(); blocked['searches'] = 3
-            failure = subprocess.run(args,capture_output=True,text=True,timeout=10)
+            failure = subprocess.run(args,capture_output=True,text=True,timeout=10,env=environment)
             self.assertNotEqual(failure.returncode,0)
             self.assertIn('search_failed',failure.stderr)
             self.assertEqual(calls,['/v2/search']*3)
