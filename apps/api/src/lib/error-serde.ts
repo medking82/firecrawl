@@ -40,6 +40,7 @@ import {
   VideoUnsupportedUrlError,
   MediaAccessDeniedError,
   PromptInjectionDetectedError,
+  PaywalledContentError,
   JsonExtractionContentTooLargeError,
   UsOnlyUnavailableError,
   ReservedCapacityUnavailableError,
@@ -95,6 +96,7 @@ const errorMap: Record<ErrorCodes, any> = {
   SCRAPE_VIDEO_UNSUPPORTED_URL: VideoUnsupportedUrlError,
   SCRAPE_MEDIA_ACCESS_DENIED: MediaAccessDeniedError,
   SCRAPE_PROMPT_INJECTION_DETECTED: PromptInjectionDetectedError,
+  SCRAPE_PAYWALLED_CONTENT: PaywalledContentError,
   SCRAPE_JSON_CONTENT_TOO_LARGE: JsonExtractionContentTooLargeError,
   US_ONLY_UNAVAILABLE: UsOnlyUnavailableError,
   RESERVED_CAPACITY_UNAVAILABLE: ReservedCapacityUnavailableError,
@@ -116,6 +118,8 @@ const errorMap: Record<ErrorCodes, any> = {
   thread_expired: null,
   threads_disabled: null,
   exchange_not_enabled: null,
+  agent_not_found: null,
+  agent_status_unavailable: null,
 
   // Agent zero data retention rejections are API-level too.
   zdr_threads_unsupported: null,
