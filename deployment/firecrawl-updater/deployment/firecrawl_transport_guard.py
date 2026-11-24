@@ -177,6 +177,82 @@ TRANSPORT_PROFILES["v2.11.735"] = {'receipt_sha256': '8c9d3c2213fc2a2057de92defb
                    '/app/dist/src/lib/hosted-bash/shell.js': '571bd0790c3cc4488a4bc9d38ec66b27fa622992789e72a4cac0de59f98dbd64',
                    '/app/dist/src/lib/hosted-bash/limits.js': 'cea83ff6969ea4a86d66485acec48b468aa154cc317d42c340667fe03c82156a',
                    '/app/dist/src/scraper/scrapeURL/error.js': 'efe18bc09ad6ef98015dd2c78e48c7892a433e306204f84867ecc51a57a31eb7'}}
+
+TRANSPORT_PROFILES["v2.11.743"] = {'receipt_sha256': '6b73b621bbf20088f635c3425b3260ff4a813e66e3534bea507a76722978de82',
+ 'hashes': {'/app/dist/src/scraper/scrapeURL/engines/index.js': 'ff98b31019085de4a21ec2b3b8a4bed788db9de1a790f877d08b4a9d97e22774',
+            '/app/dist/src/scraper/scrapeURL/engines/utils/safeFetch.js': '25944a8f4bcb2986ca9a548df0d8d0fa1476b7c7745465b63f4b599b3baeeb5c',
+            '/app/dist/src/scraper/scrapeURL/engines/utils/downloadFile.js': '8ac395b87365de206b5a585f41be070c3b5cb9fa5f403c6613d19e5bc119e746',
+            '/app/dist/src/scraper/scrapeURL/engines/fetch/index.js': '6500fe7f20d148650a42d11f0b85554b6581016f3c386b71d36f4f3a27a8fd2a',
+            '/app/dist/src/scraper/scrapeURL/engines/pdf/index.js': '6a08e5c949292c9c65793baf15bbc60216764f37ab456f919e528f311338d76b',
+            '/app/dist/src/scraper/scrapeURL/engines/document/index.js': '9ee8d7745dbc40ae9715338feecb15adc3bff488818b667929ace8350059bc62',
+            '/app/dist/src/scraper/scrapeURL/index.js': '8904a5826c4b494ef407657063f8271821efc2887b764521a178e52419a36dfb',
+            '/app/dist/src/controllers/v2/types.js': '28d504d246bfbf849f48649b18c325019ce1650a3d066a5dd64a2b2a245ac2d7',
+            '/app/dist/src/lib/exchange.js': '28ba3c79d6390ca68f556cac3e54353b20ced0a8556725e7ae406eb4ab354ac7',
+            'undici/client.js': '84205dc96cb9bf7432c4b3e80f0babaa11d6f4faf24ead3e7d9660e9d8fee0b3',
+            'ipaddr.js': '75c602c8834cc9e1bcdb7d1d2eaadbbd5ba0e19660d9ea3f450dbf17f2ec8495'},
+ 'dependencies': {'node_major': 22, 'undici': '7.30.1', 'ipaddr_js': '2.2.0'},
+ 'undici_lib_sha256': '213bda9bf7c6860b6714484b606b431c7bdbe4652a20be22e3e20e8b96e1187c',
+ 'just_bash_tree_sha256': '00292c7b08c74e6aa6a401d935dabc9f0afb0bf46b1d4d72e7335a475c2bf70f',
+ 'syntax_hashes': {'/app/dist/src/scraper/scrapeURL/engines/index.js': '6ea558b99c4aa8c750cd36b184f43be7e912c929a0d1d7446e46d1d05b68ebb1',
+                   '/app/dist/src/scraper/scrapeURL/engines/utils/safeFetch.js': 'e0fe001c4f52e47f7a6551095e17726a4cce94f4cb093e35d878b239b66a4033',
+                   '/app/dist/src/scraper/scrapeURL/engines/utils/downloadFile.js': 'df4757bb63aa7c2bcf50a3485ed2a45bb55b4894c352e6c562347de46457248b',
+                   '/app/dist/src/scraper/scrapeURL/engines/fetch/index.js': 'c56db8903bb161e6b2950971168618d57ebe653760836558457b6da828bb19eb',
+                   '/app/dist/src/scraper/scrapeURL/engines/pdf/index.js': 'c91e5fe4712f33c3cb741d405ae10f53118eab63bd8078c44c6c87d18485667f',
+                   '/app/dist/src/scraper/scrapeURL/engines/document/index.js': '86e17f11fff187fec395e52d659bc506c3dd67bed76847f6adeb3cbf08c42e19',
+                   '/app/dist/src/scraper/scrapeURL/index.js': '36e6c60ab39e8bbe454f584d9d63aa2ba3e5f45cd6a998c0accb306b70efdde4',
+                   '/app/dist/src/controllers/v2/types.js': '428add5a75053ae6680371111a939a7345f25890803f1bb331533813abc031f9',
+                   '/app/dist/src/lib/exchange.js': '43cf8cf01beb14ec73395ec5f61ae4cdcfc702c2ce77369cea2857635d771dd5',
+                   'undici/client.js': '7e7cb53c1ef1483358468fbe91463a836b5b6e5fe2e791fc509417735d602646',
+                   'ipaddr.js': 'c654870b883b9d766ecc880a28899f19a5a68f1b4e9c6ee8777fe62c62222af0',
+                   '/app/dist/src/config.js': 'c9cb73b97343928cb89bd017d479d96159aa84dbe149e9a976bcc94e076f710b',
+                   '/app/dist/src/index.js': '76a56926c8d7c4b41b556b6b9195484a19b2babbd1bdc406cbd75b157825fa46',
+                   '/app/dist/src/controllers/v2/bash.js': 'beb619eeddd3a12997a3ffa3e45195cc19be8af8cd9e6c8ef0ab408821c27920',
+                   '/app/dist/src/lib/reserved-capacity.js': '7b95c4334e83e2a1d2a92c6f4fdbecaabf2e122400d2998167965c7d677337e8',
+                   '/app/dist/src/lib/x-twitter-url.js': 'c6ff2d615bfa1bc5d643fa555cfb836ef07ee3ec2734ec0768ac8bd83b8be212',
+                   '/app/dist/src/lib/hosted-bash/docs.js': '25d1d63a1edd695d68f6e7c4b0b58f29e6a3521da380012e993c698a178164eb',
+                   '/app/dist/src/lib/hosted-bash/firecrawl-command.js': '9baf6787e09e83eb6ff6dd7297622c6c8f67c7abd9aee9c9e6430ee2924b0d90',
+                   '/app/dist/src/lib/hosted-bash/shell-worker.js': '31d44512c9ef6f54f0c25515021c7c042268557c20a0e53f72eb510c9d76e869',
+                   '/app/dist/src/lib/hosted-bash/shell.js': '571bd0790c3cc4488a4bc9d38ec66b27fa622992789e72a4cac0de59f98dbd64',
+                   '/app/dist/src/lib/hosted-bash/limits.js': 'cea83ff6969ea4a86d66485acec48b468aa154cc317d42c340667fe03c82156a',
+                   '/app/dist/src/scraper/scrapeURL/error.js': 'efe18bc09ad6ef98015dd2c78e48c7892a433e306204f84867ecc51a57a31eb7'}}
+
+TRANSPORT_PROFILES["v2.11.784"] = {'dependencies': {'ipaddr_js': '2.2.0', 'node_major': 22, 'undici': '7.30.1'},
+ 'hashes': {'/app/dist/src/controllers/v2/types.js': '28d504d246bfbf849f48649b18c325019ce1650a3d066a5dd64a2b2a245ac2d7',
+            '/app/dist/src/lib/exchange.js': '28ba3c79d6390ca68f556cac3e54353b20ced0a8556725e7ae406eb4ab354ac7',
+            '/app/dist/src/scraper/scrapeURL/engines/document/index.js': '9ee8d7745dbc40ae9715338feecb15adc3bff488818b667929ace8350059bc62',
+            '/app/dist/src/scraper/scrapeURL/engines/fetch/index.js': '6500fe7f20d148650a42d11f0b85554b6581016f3c386b71d36f4f3a27a8fd2a',
+            '/app/dist/src/scraper/scrapeURL/engines/index.js': 'ff98b31019085de4a21ec2b3b8a4bed788db9de1a790f877d08b4a9d97e22774',
+            '/app/dist/src/scraper/scrapeURL/engines/pdf/index.js': '5b7cde260f05191d421d6d05e50a5be5350aeed8ad0367446c0b88f2158415d9',
+            '/app/dist/src/scraper/scrapeURL/engines/utils/downloadFile.js': '8ac395b87365de206b5a585f41be070c3b5cb9fa5f403c6613d19e5bc119e746',
+            '/app/dist/src/scraper/scrapeURL/engines/utils/safeFetch.js': '25944a8f4bcb2986ca9a548df0d8d0fa1476b7c7745465b63f4b599b3baeeb5c',
+            '/app/dist/src/scraper/scrapeURL/index.js': '29ece15de1daac8bf8af3dd4e4b4188e228fbe6be217ed572b4650a0098cf055',
+            'ipaddr.js': '75c602c8834cc9e1bcdb7d1d2eaadbbd5ba0e19660d9ea3f450dbf17f2ec8495',
+            'undici/client.js': '84205dc96cb9bf7432c4b3e80f0babaa11d6f4faf24ead3e7d9660e9d8fee0b3'},
+ 'just_bash_tree_sha256': '00292c7b08c74e6aa6a401d935dabc9f0afb0bf46b1d4d72e7335a475c2bf70f',
+ 'receipt_sha256': 'be128b2a2441a6432af81c68de6db0a67cc5f314a399a04f956741c75b13a7fc',
+ 'syntax_hashes': {'/app/dist/src/config.js': '6b032e87c74b5c2206258159960a7b22de9ea63e2e4e8dd8069ad92c22c5b3ce',
+                   '/app/dist/src/controllers/v2/bash.js': 'beb619eeddd3a12997a3ffa3e45195cc19be8af8cd9e6c8ef0ab408821c27920',
+                   '/app/dist/src/controllers/v2/types.js': '428add5a75053ae6680371111a939a7345f25890803f1bb331533813abc031f9',
+                   '/app/dist/src/index.js': '2da1e8e03de63f636ede34a9bacf9ca4c3a1c6c738638b335a672fda23c49358',
+                   '/app/dist/src/lib/exchange.js': '43cf8cf01beb14ec73395ec5f61ae4cdcfc702c2ce77369cea2857635d771dd5',
+                   '/app/dist/src/lib/hosted-bash/docs.js': '25d1d63a1edd695d68f6e7c4b0b58f29e6a3521da380012e993c698a178164eb',
+                   '/app/dist/src/lib/hosted-bash/firecrawl-command.js': '9baf6787e09e83eb6ff6dd7297622c6c8f67c7abd9aee9c9e6430ee2924b0d90',
+                   '/app/dist/src/lib/hosted-bash/limits.js': 'cea83ff6969ea4a86d66485acec48b468aa154cc317d42c340667fe03c82156a',
+                   '/app/dist/src/lib/hosted-bash/shell-worker.js': '31d44512c9ef6f54f0c25515021c7c042268557c20a0e53f72eb510c9d76e869',
+                   '/app/dist/src/lib/hosted-bash/shell.js': '571bd0790c3cc4488a4bc9d38ec66b27fa622992789e72a4cac0de59f98dbd64',
+                   '/app/dist/src/lib/reserved-capacity.js': '7b95c4334e83e2a1d2a92c6f4fdbecaabf2e122400d2998167965c7d677337e8',
+                   '/app/dist/src/lib/x-twitter-url.js': 'c6ff2d615bfa1bc5d643fa555cfb836ef07ee3ec2734ec0768ac8bd83b8be212',
+                   '/app/dist/src/scraper/scrapeURL/engines/document/index.js': '86e17f11fff187fec395e52d659bc506c3dd67bed76847f6adeb3cbf08c42e19',
+                   '/app/dist/src/scraper/scrapeURL/engines/fetch/index.js': 'c56db8903bb161e6b2950971168618d57ebe653760836558457b6da828bb19eb',
+                   '/app/dist/src/scraper/scrapeURL/engines/index.js': '6ea558b99c4aa8c750cd36b184f43be7e912c929a0d1d7446e46d1d05b68ebb1',
+                   '/app/dist/src/scraper/scrapeURL/engines/pdf/index.js': '472f6fd8fe1c6fcbc0c4a4c4b32de4c464ab4d4c356bae487dc824fa16804d7d',
+                   '/app/dist/src/scraper/scrapeURL/engines/utils/downloadFile.js': 'df4757bb63aa7c2bcf50a3485ed2a45bb55b4894c352e6c562347de46457248b',
+                   '/app/dist/src/scraper/scrapeURL/engines/utils/safeFetch.js': 'e0fe001c4f52e47f7a6551095e17726a4cce94f4cb093e35d878b239b66a4033',
+                   '/app/dist/src/scraper/scrapeURL/error.js': '306bbc67df3d7bc5009ca3be7c27eeac83925ec8182f7a4517cb3edf6f9215c9',
+                   '/app/dist/src/scraper/scrapeURL/index.js': '6fb5276255b2bb899013191771c76fe519efb0bc044ab04d93dd0643489387ed',
+                   'ipaddr.js': 'c654870b883b9d766ecc880a28899f19a5a68f1b4e9c6ee8777fe62c62222af0',
+                   'undici/client.js': '7e7cb53c1ef1483358468fbe91463a836b5b6e5fe2e791fc509417735d602646'},
+ 'undici_lib_sha256': '213bda9bf7c6860b6714484b606b431c7bdbe4652a20be22e3e20e8b96e1187c'}
 # Frozen audit: deployment/firecrawl-transport-20261124-v831.json.
 # Complete syntax program and dependency trees (hosted-bash removed upstream); future stable tags may reuse it.
 TRANSPORT_PROFILES["v2.11.831"] = {
@@ -216,7 +292,6 @@ TRANSPORT_PROFILES["v2.11.831"] = {
         '/app/dist/src/scraper/scrapeURL/error.js': 'b72ad52e95007e3f921eebdf7d510bfdf9cc8662fd78b7aaada3e4dfcfc9c14b',
     },
 }
-
 EXPECTED_PREDICATES = {
     "ALLOW_LOCAL_WEBHOOKS_true": False,
     "PROXY_SERVER_nonempty": False,
@@ -230,6 +305,11 @@ EXPECTED_PREDICATES = {
     "FIRE_EXCHANGE_URL_nonempty": False,
     "FORCED_ENGINE_DOMAINS_nonempty": False,
     "PLAYWRIGHT_MICROSERVICE_URL_configured": True,
+    # New optional routes/ambient credentials stay disabled for public-fetch.
+    # Require ADC unset: Zod accepts 'yes' and '1', not only literal 'true'.
+    "FRESH_FEED_URL_nonempty": False,
+    "PUBSUB_PROJECT_ID_nonempty": False,
+    "VERTEX_USE_ADC_nonempty": False,
 }
 TOTAL_TIMEOUT = 30
 COMMAND_TIMEOUT = 10
@@ -520,10 +600,12 @@ def _preflight():
     fingerprint_match, syntax_checked = "exact", 0
     # A complete audited syntax profile may also admit changed formatting or
     # comments. Never learn expectations from the candidate or mix profiles.
+    # Several audited profiles can share base bytes while config/helpers differ.
+    # Compare complete programs; an early raw match must not hide a later audit.
     syntax_candidates = [(name, profile) for name, profile in TRANSPORT_PROFILES.items()
                          if profile.get("syntax_hashes") and dependencies_match(profile)
                          and bool(probe["hosted_bash_present"]) == bool(profile.get("just_bash_tree_sha256"))
-                         and (profile_name is None or name == profile_name)]
+                         and (profile_name is None or profile["hashes"] == probe["hashes"])]
     if syntax_candidates:
         paths = sorted({key for _, profile in syntax_candidates for key in profile["syntax_hashes"]})
         syntax = run_json(["docker", "exec", identity, "node", "-e", syntax_probe_source(paths)],

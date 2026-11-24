@@ -203,6 +203,7 @@ else: raise SystemExit('unexpected Docker action')
         guard=importlib.util.module_from_spec(spec); spec.loader.exec_module(guard)
         for name,profile in guard.TRANSPORT_PROFILES.items():
             with self.subTest(profile=name):
+                self.probe['hosted_bash_present']=bool(profile.get('just_bash_tree_sha256'))
                 self.probe['hashes']=copy.deepcopy(profile['hashes'])
                 self.probe['dependencies']=copy.deepcopy(profile['dependencies'])
                 self.syntax = {'syntax_hashes': copy.deepcopy(profile.get('syntax_hashes', {}))}
