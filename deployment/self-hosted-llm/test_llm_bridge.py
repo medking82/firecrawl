@@ -93,6 +93,17 @@ class BridgeTests(unittest.TestCase):
             self.server.effort = bridge.EFFORT
         self.assertEqual(self.upstream.calls[-1][1], {'model': 'codex/gpt-6-luna--fast', 'input': 'x'})
 
+    def test_routing_group_model_is_forwarded_without_codex_prefix(self):
+        prev = self.server.models
+        self.server.models = frozenset({'group/athena', 'group/themis'})
+        try:
+            for group in ('group/athena', 'group/themis'):
+                status, _ = self.call('/v1/responses', {'model': group, 'input': 'x'})
+                self.assertEqual(status, 200)
+                self.assertEqual(self.upstream.calls[-1][1]['model'], group)
+        finally:
+            self.server.models = prev
+
     def test_missing_host_token_sends_no_authorization(self):
         self.assertEqual(self.call()[0], 200)
         self.assertIsNone(self.upstream.calls[-1][2])

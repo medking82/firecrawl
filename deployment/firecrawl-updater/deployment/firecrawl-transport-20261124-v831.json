@@ -1,0 +1,70 @@
+{
+  "schema": 2,
+  "profile": "v2.11.831",
+  "scope": "Audited public static-fetch and Exchange file-route gating boundaries (hosted virtual shell removed upstream); not whole-image safety or deployment approval",
+  "source_commit": "4924105f57c105fa678706e05fa234d66b5b061e",
+  "baseline_profile": "v2.11.735",
+  "candidate_api_image": "sha256:5b9e69f04f180701a019f3f34a79a74bdb585bec7f1894bf9dc806097b435bab",
+  "export_archive_sha256": "385c572c7476a5df8bb6456c955290c2da96930f0add70818befc1d3a610343b",
+  "dependencies": {
+    "node_major": 22,
+    "undici": "7.30.1",
+    "ipaddr_js": "2.2.0"
+  },
+  "undici_lib_sha256": "213bda9bf7c6860b6714484b606b431c7bdbe4652a20be22e3e20e8b96e1187c",
+  "hashes": {
+    "/app/dist/src/scraper/scrapeURL/engines/index.js": "ff98b31019085de4a21ec2b3b8a4bed788db9de1a790f877d08b4a9d97e22774",
+    "/app/dist/src/scraper/scrapeURL/engines/utils/safeFetch.js": "25944a8f4bcb2986ca9a548df0d8d0fa1476b7c7745465b63f4b599b3baeeb5c",
+    "/app/dist/src/scraper/scrapeURL/engines/utils/downloadFile.js": "8ac395b87365de206b5a585f41be070c3b5cb9fa5f403c6613d19e5bc119e746",
+    "/app/dist/src/scraper/scrapeURL/engines/fetch/index.js": "6500fe7f20d148650a42d11f0b85554b6581016f3c386b71d36f4f3a27a8fd2a",
+    "/app/dist/src/scraper/scrapeURL/engines/pdf/index.js": "2a7edbf98c550273c86e76b8fad14b23a8097c0fcd1f35d9d5d5053794ae556f",
+    "/app/dist/src/scraper/scrapeURL/engines/document/index.js": "9ee8d7745dbc40ae9715338feecb15adc3bff488818b667929ace8350059bc62",
+    "/app/dist/src/scraper/scrapeURL/index.js": "29ece15de1daac8bf8af3dd4e4b4188e228fbe6be217ed572b4650a0098cf055",
+    "/app/dist/src/controllers/v2/types.js": "de49566ad980ed0d9438cc488eb5e81fe2f8769b5b514968b8ee1d6b10dc557e",
+    "/app/dist/src/lib/exchange.js": "816c5f9180c50122df0818e2f75abfee12532297f7e5c8e52d5f1ab55bc7a23a",
+    "undici/client.js": "84205dc96cb9bf7432c4b3e80f0babaa11d6f4faf24ead3e7d9660e9d8fee0b3",
+    "ipaddr.js": "75c602c8834cc9e1bcdb7d1d2eaadbbd5ba0e19660d9ea3f450dbf17f2ec8495"
+  },
+  "additional_hashes": {
+    "/app/dist/src/config.js": "814ec33234cb3f133ce5034950c4ec71578c63c883d8b2e524db4b11bb9848ad",
+    "/app/dist/src/index.js": "7a44355ea493d46031890890d911a4ff909b84c057a2410816b7a9a845b50781",
+    "/app/dist/src/routes/exchange-files.js": "7a7425546416cacccaa5e33efe6062b0244a5005e64f09d641e3ba8ac6adbe00",
+    "/app/dist/src/lib/reserved-capacity.js": "6cc9b694a4302400ea56d3d68df7657e8c46d37e85f5bcc2edd018432781213f",
+    "/app/dist/src/lib/x-twitter-url.js": "b67feff4d184702fc21a78150368b072ae741f1cc76d70ec7b49232d93f5a9a6",
+    "/app/dist/src/scraper/scrapeURL/error.js": "27975f4b780fc0d0e0a69e1fd48b599cf7934c70571ea61ee471a0c4089ddd6b"
+  },
+  "syntax_hashes": {
+    "/app/dist/src/scraper/scrapeURL/engines/index.js": "6ea558b99c4aa8c750cd36b184f43be7e912c929a0d1d7446e46d1d05b68ebb1",
+    "/app/dist/src/scraper/scrapeURL/engines/utils/safeFetch.js": "e0fe001c4f52e47f7a6551095e17726a4cce94f4cb093e35d878b239b66a4033",
+    "/app/dist/src/scraper/scrapeURL/engines/utils/downloadFile.js": "df4757bb63aa7c2bcf50a3485ed2a45bb55b4894c352e6c562347de46457248b",
+    "/app/dist/src/scraper/scrapeURL/engines/fetch/index.js": "c56db8903bb161e6b2950971168618d57ebe653760836558457b6da828bb19eb",
+    "/app/dist/src/scraper/scrapeURL/engines/pdf/index.js": "4bd7d66ec948b8455e34ecff007b4bf9212b56483e680acc1b13892506e6b21d",
+    "/app/dist/src/scraper/scrapeURL/engines/document/index.js": "86e17f11fff187fec395e52d659bc506c3dd67bed76847f6adeb3cbf08c42e19",
+    "/app/dist/src/scraper/scrapeURL/index.js": "6fb5276255b2bb899013191771c76fe519efb0bc044ab04d93dd0643489387ed",
+    "/app/dist/src/controllers/v2/types.js": "8f9377833d16cf8042e3ba0ce04b82848279db37e0b21a4accae40755e69881e",
+    "/app/dist/src/lib/exchange.js": "e5523b3e2e87fcbc70771c6f4f40cefae53c44ef75152db88bbc658e05add417",
+    "undici/client.js": "7e7cb53c1ef1483358468fbe91463a836b5b6e5fe2e791fc509417735d602646",
+    "ipaddr.js": "c654870b883b9d766ecc880a28899f19a5a68f1b4e9c6ee8777fe62c62222af0",
+    "/app/dist/src/config.js": "d157464c41192d26c7bf1aafbeadea44b6261b72b2726d0e553e1d53bfd09bac",
+    "/app/dist/src/index.js": "e94b717bf93121774baa9622970164b59ae9bd69dd2fa73e44860a12a0303d0f",
+    "/app/dist/src/routes/exchange-files.js": "da781e482858e0afedcbdfdff58658a92671ae1d5ee44f0329b68353cb317a59",
+    "/app/dist/src/lib/reserved-capacity.js": "7b95c4334e83e2a1d2a92c6f4fdbecaabf2e122400d2998167965c7d677337e8",
+    "/app/dist/src/lib/x-twitter-url.js": "c6ff2d615bfa1bc5d643fa555cfb836ef07ee3ec2734ec0768ac8bd83b8be212",
+    "/app/dist/src/scraper/scrapeURL/error.js": "b72ad52e95007e3f921eebdf7d510bfdf9cc8662fd78b7aaada3e4dfcfc9c14b"
+  },
+  "audit": [
+    "engines/index.js, safeFetch.js, downloadFile.js, fetch/index.js, document/index.js, reserved-capacity.js, and x-twitter-url.js remain byte-identical to v2.11.735. Node 22, undici 7.30.1 (116 lib files), and ipaddr.js 2.2.0 remain identical.",
+    "Upstream removed hosted-bash (/v2/bash, apps/api/src/lib/hosted-bash/*) and the just-bash dependency completely; hosted_bash_present is verified false.",
+    "pdf/index.ts removed the deprecated RunPod MUv1 experiment code path, preserving the existing local PDF parse fallback without adding any outbound transport.",
+    "exchange.ts and scraper/scrapeURL/error.ts add static error-code metadata and rename ErrorCodes to ErrorCode; types.ts and scrapeURL/index.ts remove deprecated v1 agent options and add workContactOnly/skipSearchHighlights/feedback endpoints.",
+    "index.ts removes registerHostedBashRoute and adds registerExchangeFileRoutes (apps/api/src/routes/exchange-files.ts). That route fails closed (HTTP 503) whenever FIRE_EXCHANGE_URL is unset, which remains enforced by EXPECTED_PREDICATES['FIRE_EXCHANGE_URL_nonempty'] == False.",
+    "Guard syntax_candidates now matches profile shell presence (bool(hosted_bash_present) == bool(just_bash_tree_sha256)) so non-shell candidates do not probe deleted hosted-bash files while shell-bearing candidates still require a pinned just-bash dependency tree."
+  ],
+  "validation": [
+    "Ubuntu 26.04 native Node 26.13.1 independently verified all 17 compiled JS raw hashes, AST syntax hashes, and all 116 undici/lib tree entries against GA401 Node 22.23.5 read-only container export; archive SHA256 matched.",
+    "All Firecrawl updater, transport syntax, release selection, fork sync, approval, candidate, patch, and research update regression tests passed on native Ubuntu."
+  ],
+  "dependency_tree_counts": {
+    "undici_lib": 116
+  }
+}

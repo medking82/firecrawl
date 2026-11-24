@@ -173,6 +173,45 @@ console.log(JSON.stringify(sources.map(syntaxHash)));
         a, b = self.hashes('const a=123n;', 'const a = 123n; // note')
         self.assertEqual(a, b)
 
+    def test_non_shell_candidate_skips_shell_profile_syntax_files(self):
+        shell_profile = copy.deepcopy(guard.TRANSPORT_PROFILES['v2.11.735'])
+        clean_profile = copy.deepcopy(guard.TRANSPORT_PROFILES['v2.11.831'])
+        probe = {
+            'hosted_bash_present': False,
+            'hashes': copy.deepcopy(clean_profile['hashes']),
+            'dependencies': copy.deepcopy(clean_profile['dependencies']),
+            'predicates': dict(guard.EXPECTED_PREDICATES),
+            'safeguards': dict.fromkeys(('private_bypass_absent_or_empty', 'db_auth_canonical_false',
+                'dotenv_absent', 'alternate_dotenv_unconfigured', 'expected_working_directory',
+                'node_options_unconfigured'), True),
+        }
+        container = {'id': 'c' * 64, 'image': 'sha256:' + 'd' * 64, 'running': True}
+        seen_syntax_cmds = []
+        def response(args, stage, deadline):
+            if args[1] == 'inspect':
+                return container
+            if 'syntax_hashes' in args[-1]:
+                seen_syntax_cmds.append(args[-1])
+                self.assertNotIn('/app/dist/src/controllers/v2/bash.js', args[-1])
+                return {'syntax_hashes': copy.deepcopy(clean_profile['syntax_hashes'])}
+            if 'undici_lib_sha256' in args[-1]:
+                return {'undici_lib_sha256': clean_profile['undici_lib_sha256'], 'file_count': 116}
+            return probe
+        with patch.object(guard, 'TRANSPORT_PROFILES', {'shell': shell_profile, 'clean': clean_profile}), \
+                patch.object(guard, 'run_json', side_effect=response):
+            result = guard.verify()
+        self.assertTrue(result['verified'], result)
+        self.assertEqual(result['transport_profile'], 'clean')
+        self.assertEqual(len(seen_syntax_cmds), 1)
+        # Conversely, a shell-bearing candidate cannot be admitted by a non-shell syntax profile.
+        probe_with_shell = copy.deepcopy(probe)
+        probe_with_shell['hosted_bash_present'] = True
+        with patch.object(guard, 'TRANSPORT_PROFILES', {'clean': clean_profile}), \
+                patch.object(guard, 'run_json', side_effect=lambda a, s, d: container if a[1] == 'inspect' else probe_with_shell):
+            rejected = guard.verify()
+        self.assertFalse(rejected['verified'])
+        self.assertEqual(rejected['error'], 'shell_profile_required')
+
 
 if __name__ == '__main__':
     unittest.main()

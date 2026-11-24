@@ -87,6 +87,14 @@ class MagpieJudge(unittest.TestCase):
         self.assertEqual(Fake.seen[0][2]['model'], 'codex/gpt-6.1-sol')
         self.assertEqual(Fake.seen[0][2]['reasoning'], {'effort': 'low'})
 
+    def test_routing_group_passes_through_without_codex_prefix(self):
+        for group in ('group/athena', 'group/themis'):
+            Fake.seen.clear()
+            with patch.dict(os.environ, {'MAGPIE_JUDGE_MODEL': group, 'MAGPIE_JUDGE_EFFORT': 'low'}):
+                result = magpie_judge.judge('s', 'p', timeout=5, schema=SCHEMA)
+            self.assertEqual(result['model'], group)
+            self.assertEqual(Fake.seen[0][2]['model'], group)
+
     def test_rejects_bad_settings_and_inputs_before_network(self):
         for kwargs in ({'model': 'codex/x'}, {'effort': 'max'}):
             with self.assertRaises(ValueError):

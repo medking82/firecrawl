@@ -125,8 +125,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if model not in self.server.models:
             return self.reply(400, 'model_not_allowed')
         effort = self.server.effort
-        # Preserve the caller's bare model allowlist while pinning its subscription transport.
-        body['model'] = 'codex/' + model
+        # Preserve explicit Magpie routing groups (group/*); pin bare models to codex/.
+        body['model'] = model if model.startswith('group/') else 'codex/' + model
         # Add the configured reasoning level only when the caller did not set one.
         if effort and self.path == '/v1/responses' and not isinstance(body.get('reasoning'), dict):
             body['reasoning'] = {'effort': effort}

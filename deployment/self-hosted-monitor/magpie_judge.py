@@ -8,11 +8,13 @@ import http.client
 import json
 import os
 from pathlib import Path
+import re
 import time
 
 UPSTREAM = ('127.0.0.1', 3425)
 TOKEN_FILE = Path.home() / '.local/state/firecrawl-core-llm/magpie-key'
 MODEL = 'gpt-6.1-terra'
+GROUP_MODEL = re.compile(r'^group/[a-z0-9-]+$')
 EFFORT = 'medium'
 EFFORTS = ('none', 'minimal', 'low', 'medium', 'high', 'xhigh')
 MAX_INPUT = 128000
@@ -43,7 +45,7 @@ MONITOR_SCHEMA = {
 def settings(model=None, effort=None):
     chosen = model or os.environ.get('MAGPIE_JUDGE_MODEL', MODEL)
     level = effort or os.environ.get('MAGPIE_JUDGE_EFFORT', EFFORT)
-    if not isinstance(chosen, str) or not chosen or '/' in chosen:
+    if not isinstance(chosen, str) or not chosen or ('/' in chosen and not GROUP_MODEL.fullmatch(chosen)):
         raise ValueError('bare_model_required')
     if level not in EFFORTS:
         raise ValueError('invalid_effort')
@@ -53,9 +55,10 @@ def settings(model=None, effort=None):
 def request_body(system, prompt, schema, chosen):
     lead = ('Judge the supplied monitoring evidence as text only. ' if schema is None
             else 'Return structured text matching the supplied schema. ')
+    upstream_model = chosen['model'] if chosen['model'].startswith('group/') else 'codex/' + chosen['model']
     return {
-        # The codex/ prefix pins Magpie's subscription transport, as in the core bridge.
-        'model': 'codex/' + chosen['model'],
+        # Preserve Magpie routing groups (group/*); pin bare models to codex/.
+        'model': upstream_model,
         'instructions': lead + TAIL + system,
         'input': prompt,
         'reasoning': {'effort': chosen['model_reasoning_effort']},

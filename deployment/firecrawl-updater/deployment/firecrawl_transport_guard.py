@@ -177,6 +177,45 @@ TRANSPORT_PROFILES["v2.11.735"] = {'receipt_sha256': '8c9d3c2213fc2a2057de92defb
                    '/app/dist/src/lib/hosted-bash/shell.js': '571bd0790c3cc4488a4bc9d38ec66b27fa622992789e72a4cac0de59f98dbd64',
                    '/app/dist/src/lib/hosted-bash/limits.js': 'cea83ff6969ea4a86d66485acec48b468aa154cc317d42c340667fe03c82156a',
                    '/app/dist/src/scraper/scrapeURL/error.js': 'efe18bc09ad6ef98015dd2c78e48c7892a433e306204f84867ecc51a57a31eb7'}}
+# Frozen audit: deployment/firecrawl-transport-20261124-v831.json.
+# Complete syntax program and dependency trees (hosted-bash removed upstream); future stable tags may reuse it.
+TRANSPORT_PROFILES["v2.11.831"] = {
+    'receipt_sha256': 'acf5a2520e7564c79ad8f540f850b530737206ee610ae7ecae2c4e68f87cc5e9',
+    'hashes': {
+        '/app/dist/src/scraper/scrapeURL/engines/index.js': 'ff98b31019085de4a21ec2b3b8a4bed788db9de1a790f877d08b4a9d97e22774',
+        '/app/dist/src/scraper/scrapeURL/engines/utils/safeFetch.js': '25944a8f4bcb2986ca9a548df0d8d0fa1476b7c7745465b63f4b599b3baeeb5c',
+        '/app/dist/src/scraper/scrapeURL/engines/utils/downloadFile.js': '8ac395b87365de206b5a585f41be070c3b5cb9fa5f403c6613d19e5bc119e746',
+        '/app/dist/src/scraper/scrapeURL/engines/fetch/index.js': '6500fe7f20d148650a42d11f0b85554b6581016f3c386b71d36f4f3a27a8fd2a',
+        '/app/dist/src/scraper/scrapeURL/engines/pdf/index.js': '2a7edbf98c550273c86e76b8fad14b23a8097c0fcd1f35d9d5d5053794ae556f',
+        '/app/dist/src/scraper/scrapeURL/engines/document/index.js': '9ee8d7745dbc40ae9715338feecb15adc3bff488818b667929ace8350059bc62',
+        '/app/dist/src/scraper/scrapeURL/index.js': '29ece15de1daac8bf8af3dd4e4b4188e228fbe6be217ed572b4650a0098cf055',
+        '/app/dist/src/controllers/v2/types.js': 'de49566ad980ed0d9438cc488eb5e81fe2f8769b5b514968b8ee1d6b10dc557e',
+        '/app/dist/src/lib/exchange.js': '816c5f9180c50122df0818e2f75abfee12532297f7e5c8e52d5f1ab55bc7a23a',
+        'undici/client.js': '84205dc96cb9bf7432c4b3e80f0babaa11d6f4faf24ead3e7d9660e9d8fee0b3',
+        'ipaddr.js': '75c602c8834cc9e1bcdb7d1d2eaadbbd5ba0e19660d9ea3f450dbf17f2ec8495',
+    },
+    'dependencies': {'node_major': 22, 'undici': '7.30.1', 'ipaddr_js': '2.2.0'},
+    'undici_lib_sha256': '213bda9bf7c6860b6714484b606b431c7bdbe4652a20be22e3e20e8b96e1187c',
+    'syntax_hashes': {
+        '/app/dist/src/scraper/scrapeURL/engines/index.js': '6ea558b99c4aa8c750cd36b184f43be7e912c929a0d1d7446e46d1d05b68ebb1',
+        '/app/dist/src/scraper/scrapeURL/engines/utils/safeFetch.js': 'e0fe001c4f52e47f7a6551095e17726a4cce94f4cb093e35d878b239b66a4033',
+        '/app/dist/src/scraper/scrapeURL/engines/utils/downloadFile.js': 'df4757bb63aa7c2bcf50a3485ed2a45bb55b4894c352e6c562347de46457248b',
+        '/app/dist/src/scraper/scrapeURL/engines/fetch/index.js': 'c56db8903bb161e6b2950971168618d57ebe653760836558457b6da828bb19eb',
+        '/app/dist/src/scraper/scrapeURL/engines/pdf/index.js': '4bd7d66ec948b8455e34ecff007b4bf9212b56483e680acc1b13892506e6b21d',
+        '/app/dist/src/scraper/scrapeURL/engines/document/index.js': '86e17f11fff187fec395e52d659bc506c3dd67bed76847f6adeb3cbf08c42e19',
+        '/app/dist/src/scraper/scrapeURL/index.js': '6fb5276255b2bb899013191771c76fe519efb0bc044ab04d93dd0643489387ed',
+        '/app/dist/src/controllers/v2/types.js': '8f9377833d16cf8042e3ba0ce04b82848279db37e0b21a4accae40755e69881e',
+        '/app/dist/src/lib/exchange.js': 'e5523b3e2e87fcbc70771c6f4f40cefae53c44ef75152db88bbc658e05add417',
+        'undici/client.js': '7e7cb53c1ef1483358468fbe91463a836b5b6e5fe2e791fc509417735d602646',
+        'ipaddr.js': 'c654870b883b9d766ecc880a28899f19a5a68f1b4e9c6ee8777fe62c62222af0',
+        '/app/dist/src/config.js': 'd157464c41192d26c7bf1aafbeadea44b6261b72b2726d0e553e1d53bfd09bac',
+        '/app/dist/src/index.js': 'e94b717bf93121774baa9622970164b59ae9bd69dd2fa73e44860a12a0303d0f',
+        '/app/dist/src/routes/exchange-files.js': 'da781e482858e0afedcbdfdff58658a92671ae1d5ee44f0329b68353cb317a59',
+        '/app/dist/src/lib/reserved-capacity.js': '7b95c4334e83e2a1d2a92c6f4fdbecaabf2e122400d2998167965c7d677337e8',
+        '/app/dist/src/lib/x-twitter-url.js': 'c6ff2d615bfa1bc5d643fa555cfb836ef07ee3ec2734ec0768ac8bd83b8be212',
+        '/app/dist/src/scraper/scrapeURL/error.js': 'b72ad52e95007e3f921eebdf7d510bfdf9cc8662fd78b7aaada3e4dfcfc9c14b',
+    },
+}
 
 EXPECTED_PREDICATES = {
     "ALLOW_LOCAL_WEBHOOKS_true": False,
@@ -282,8 +321,10 @@ try {
   };
   const workerLoad = require('module').createRequire('/app/dist/src/lib/hosted-bash/shell-worker.js');
   let shellPackage = false;
-  try { workerLoad.resolve('just-bash'); shellPackage = true; }
-  catch (error) { if (error.code !== 'MODULE_NOT_FOUND') throw error; }
+  for (const resolver of [load, workerLoad]) {
+    try { resolver.resolve('just-bash'); shellPackage = true; }
+    catch (error) { if (error.code !== 'MODULE_NOT_FOUND') throw error; }
+  }
   const hosted_bash_present = shellPackage || fs.existsSync('/app/dist/src/lib/hosted-bash')
     || fs.existsSync('/app/dist/src/controllers/v2/bash.js');
   console.log(JSON.stringify({hashes, dependencies, predicates: actual, safeguards, hosted_bash_present}));
@@ -481,7 +522,7 @@ def _preflight():
     # comments. Never learn expectations from the candidate or mix profiles.
     syntax_candidates = [(name, profile) for name, profile in TRANSPORT_PROFILES.items()
                          if profile.get("syntax_hashes") and dependencies_match(profile)
-                         and (not probe["hosted_bash_present"] or profile.get("just_bash_tree_sha256"))
+                         and bool(probe["hosted_bash_present"]) == bool(profile.get("just_bash_tree_sha256"))
                          and (profile_name is None or name == profile_name)]
     if syntax_candidates:
         paths = sorted({key for _, profile in syntax_candidates for key in profile["syntax_hashes"]})
