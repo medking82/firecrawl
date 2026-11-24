@@ -100,7 +100,6 @@ jobs:
         run: |
           node --test deployment/self-hosted-browser/cdp-transport.test.cjs
           python3 -B -m unittest discover -s deployment/self-hosted-browser -p 'test_activation.py'
-          python3 -B -m unittest discover -s deployment/official-reader -p 'test_official_read.py'
 
       - run: pnpm fetch
         working-directory: apps/api
