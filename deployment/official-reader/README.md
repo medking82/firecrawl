@@ -18,8 +18,12 @@ Use Magpie `web_search`/`web_fetch` or Firecrawl for everything else.
 official-read https://www.nmpa.gov.cn/ylqx/ylqxggtg/index.html          # Markdown, links listed
 official-read <url> --offset 20000 --max-chars 20000                      # next part
 official-read <url> --json                                                # reader JSON without page HTML
-ssh ga401 official-read <url>                                             # from the Ubuntu PC
+ssh ga401 .local/bin/official-read <url>                                  # from the Ubuntu PC
 ```
+
+Non-interactive SSH on GA401 does not put `~/.local/bin` on `PATH`, hence the
+path in the remote form. Content links (titles of 12+ characters) are listed
+before navigation links, at most 40.
 
 Calls are serialized with a lock in `$XDG_STATE_HOME/official-reader.lock`
 (waits up to 150 s, then `reader_busy`); each read has a 120 s limit. Errors

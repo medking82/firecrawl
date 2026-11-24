@@ -71,6 +71,12 @@ class Output(unittest.TestCase):
         self.assertNotIn('javascript', text)
         self.assertIn('End of retrieved content.', reader.markdown(PAGE))
 
+    def test_content_links_before_navigation(self):
+        page = dict(PAGE, links=[{'url': 'https://www.nmpa.gov.cn/nav', 'title': '首页'},
+                                 {'url': 'https://www.nmpa.gov.cn/n1', 'title': '国家药监局关于批准注册199个医疗器械产品的公告'}])
+        text = reader.markdown(page)
+        self.assertLess(text.index('/n1'), text.index('/nav'))
+
     def test_cli_json_drops_html_and_reports_failure(self):
         with tempfile.TemporaryDirectory() as tmp:
             lock = Path(tmp) / 'lock'

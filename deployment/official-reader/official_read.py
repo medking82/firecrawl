@@ -90,9 +90,10 @@ def markdown(page, offset=0, max_chars=20000):
         href, title = link.get('url') or '', ' '.join((link.get('title') or '').split())
         if href.startswith('http') and title and href not in seen:
             seen.add(href)
-            links.append(f'- {title} — {href}')
+            links.append((len(title) < 12, f'- {title} — {href}'))
     if links:
-        lines += ['', 'Links:'] + links[:MAX_LINKS]
+        links.sort(key=lambda item: item[0])
+        lines += ['', 'Links:'] + [line for _, line in links[:MAX_LINKS]]
     return '\n'.join(lines)
 
 
