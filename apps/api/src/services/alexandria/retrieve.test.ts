@@ -52,8 +52,10 @@ vi.mock("../autumn/autumn.service", () => ({
   },
   featureIdForBillingEndpoint: () => "credits",
 }));
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { gunzipSync, gzipSync } from "node:zlib";
+import { register } from "prom-client";
+import { logger } from "../../lib/logger";
 import { answerSchema } from "./contracts";
 import { retrieveProviders } from "./retrieve";
 
@@ -93,12 +95,8 @@ const cachedResponses = () =>
     JSON.parse(gunzipSync(Buffer.from(raw)).toString()),
   );
 const everythingStored = () => JSON.stringify([records(), cachedResponses()]);
-/** Rewrites the one stored record as a completed record that does not carry its response. */
-const dropStoredResponse = () => {
-  const [[key]] = storedUnder(RECORD);
-  const { response, ...record } = records()[0];
-  mocks.store.set(key, JSON.stringify(record));
-  return { id: key.slice(RECORD.length), response };
+const dropCachedResponses = () => {
+  for (const [key] of storedUnder(RESPONSE)) mocks.store.delete(key);
 };
 const executions = () =>
   mocks.request.mock.calls.filter(([arg]) => arg.path === "/v1/retrieve");
@@ -919,8 +917,10 @@ it("keeps and replays the response without zero data retention", async () => {
     mocks.request.mock.calls.every(([r]) => r.zeroDataRetention === undefined),
   ).toBe(true);
   const [stored] = records();
-  expect(stored.response).toEqual({ status: 200, body: answer });
+  expect(stored).not.toHaveProperty("response");
   expect(stored).not.toHaveProperty("responseWithheld");
+  expect(stored.responseKept).toBe(true);
+  expect(cachedResponses()).toEqual([{ status: 200, body: answer }]);
   expect(await run()).toMatchObject({
     status: 200,
     body: answer,
@@ -934,16 +934,22 @@ it("records when the request completed", async () => {
   expect(records()[0].doneAt).toBeGreaterThanOrEqual(before);
 });
 
-it("replays a response from the cache when the record does not carry it", async () => {
+it("keeps the response in the cache for an hour, gzipped, and out of the record", async () => {
   const unicode = {
     ...answer,
     results: [{ ...call, creditsCost: 3, data: { note: "café ☃ 日本語" } }],
   };
   exchangeAnswers(unicode);
   await run();
-  const { id, response } = dropStoredResponse();
-  mocks.store.set(RESPONSE + id, gzipSync(JSON.stringify(response)));
 
+  const [[key]] = storedUnder(RECORD);
+  const cached = mocks.redis.set.mock.calls.filter(([k]) =>
+    String(k).startsWith(RESPONSE),
+  );
+  expect(cached).toEqual([
+    [RESPONSE + key.slice(RECORD.length), expect.any(Buffer), "EX", 3600],
+  ]);
+  expect(cachedResponses()).toEqual([{ status: 200, body: unicode }]);
   expect(await run({ scrapeId: "scrape-2" })).toEqual({
     status: 200,
     body: unicode,
@@ -955,8 +961,8 @@ it("replays a response from the cache when the record does not carry it", async 
 
 it("treats a cached response it cannot read as one it does not have", async () => {
   await run();
-  const { id } = dropStoredResponse();
-  mocks.store.set(RESPONSE + id, Buffer.from("not gzip"));
+  const [[key]] = storedUnder(RESPONSE);
+  mocks.store.set(key, Buffer.from("not gzip"));
 
   const repeat = await run({ scrapeId: "scrape-2" });
   expect(repeat).toMatchObject({ status: 409, executed: false });
@@ -968,8 +974,6 @@ it("treats a cached response it cannot read as one it does not have", async () =
 
 it("fails a repeat whose cached response cannot be read, so the same id can be retried", async () => {
   await run();
-  const { id, response } = dropStoredResponse();
-  mocks.store.set(RESPONSE + id, gzipSync(JSON.stringify(response)));
   mocks.redis.getBuffer.mockRejectedValueOnce(new Error("Redis unavailable"));
 
   await expect(run()).rejects.toThrow("Redis unavailable");
@@ -983,7 +987,7 @@ it("fails a repeat whose cached response cannot be read, so the same id can be r
 
 it("refuses a repeat whose response is no longer kept, without running it again", async () => {
   await run();
-  dropStoredResponse();
+  dropCachedResponses();
 
   const repeat = await run({ scrapeId: "scrape-2" });
   expect(repeat).toMatchObject({ status: 409, executed: false });
@@ -991,6 +995,176 @@ it("refuses a repeat whose response is no longer kept, without running it again"
     expect.objectContaining({ code: "response_not_retained" }),
   );
   expect(executions()).toHaveLength(1);
+});
+
+describe("who repeats a request id", () => {
+  const counted = async (outcome: string, client: string) => {
+    const metric = await register
+      .getSingleMetric("firecrawl_alexandria_repeat_total")!
+      .get();
+    return (
+      metric.values.find(
+        ({ labels }) => labels.outcome === outcome && labels.client === client,
+      )?.value ?? 0
+    );
+  };
+  const logged = (info: { mock: { calls: unknown[][] } }) =>
+    info.mock.calls
+      .filter(([message]) => message === "Alexandria request repeated")
+      .map(([, fields]) => fields as Record<string, unknown>);
+
+  it("logs a repeat with its team, client and age", async () => {
+    const info = vi.spyOn(logger, "info");
+    try {
+      await run();
+      expect(logged(info)).toEqual([]);
+
+      await run({
+        scrapeId: "scrape-2",
+        clientOrigin: "mcp-claude-code@3.41.0",
+        clientIntegration: "cursor",
+      });
+      const [repeat, ...rest] = logged(info);
+      expect(rest).toEqual([]);
+      expect(repeat).toMatchObject({
+        teamId: "team",
+        outcome: "replayed",
+        client: "mcp",
+        catalogueOnly: false,
+        clientOrigin: "mcp-claude-code@3.41.0",
+        clientIntegration: "cursor",
+        calls: ["fred/series/observations"],
+        zeroDataRetention: false,
+      });
+      expect(repeat.chargeId).toEqual(expect.any(String));
+      expect(repeat.ageSeconds).toBeGreaterThanOrEqual(0);
+    } finally {
+      info.mockRestore();
+    }
+  });
+
+  it("marks the log line of a zero data retention request, which the logger drops", async () => {
+    const info = vi.spyOn(logger, "info");
+    try {
+      await run({ zeroDataRetention: true });
+      await run({ zeroDataRetention: true, scrapeId: "scrape-2" });
+      expect(logged(info)).toEqual([
+        expect.objectContaining({
+          outcome: "response_withheld",
+          zeroDataRetention: true,
+        }),
+      ]);
+    } finally {
+      info.mockRestore();
+    }
+  });
+
+  it.each([
+    [{}, "api"],
+    [{ clientOrigin: "api" }, "api"],
+    [{ clientOrigin: "mcp-ua-claude-user@3.41.0" }, "mcp"],
+    [{ hostedMcp: true }, "mcp"],
+    [{ clientOrigin: "js-sdk@4.52.0" }, "sdk"],
+    [{ clientIntegration: "cli" }, "cli"],
+    [{ clientOrigin: "cli@1.30.0" }, "cli"],
+    [{ clientOrigin: "cli.codex@1.30.0" }, "cli"],
+    [{ clientOrigin: "client-app" }, "other"],
+    [{ clientOrigin: "website" }, "other"],
+  ])("counts a repeat sent as %o under client %s", async (named, client) => {
+    await run();
+    const before = await counted("replayed", client);
+    await run({ scrapeId: "scrape-2", ...named });
+    expect(await counted("replayed", client)).toBe(before + 1);
+  });
+});
+
+it("still replays a record written with its response inside it", async () => {
+  await run();
+  const [[key]] = storedUnder(RECORD);
+  const [response] = cachedResponses();
+  mocks.store.set(key, JSON.stringify({ ...records()[0], response }));
+  dropCachedResponses();
+
+  expect(await run()).toMatchObject({
+    status: 200,
+    body: answer,
+    executed: false,
+  });
+  expect(executions()).toHaveLength(1);
+});
+
+it("does not keep a response that is over a megabyte gzipped, nor an earlier one under its id", async () => {
+  await run();
+  const [[key]] = storedUnder(RECORD);
+  mocks.store.delete(key);
+  expect(storedUnder(RESPONSE)).toHaveLength(1);
+
+  exchangeAnswers({
+    ...answer,
+    results: [
+      {
+        ...call,
+        creditsCost: 3,
+        data: { blob: randomBytes(1_200_000).toString("base64") },
+      },
+    ],
+  });
+  expect(await run()).toMatchObject({ status: 200, executed: true });
+  expect(records()[0]).toMatchObject({ phase: "done", responseKept: false });
+  expect(storedUnder(RESPONSE)).toEqual([]);
+
+  const repeat = await run();
+  expect(repeat).toMatchObject({ status: 409, executed: false });
+  expect(executions()).toHaveLength(2);
+});
+
+it("completes the request when the response cannot be cached", async () => {
+  const set = mocks.redis.set.getMockImplementation()!;
+  mocks.redis.set.mockImplementation(async (key, ...rest) => {
+    if (String(key).startsWith(RESPONSE)) throw new Error("Redis unavailable");
+    return set(key, ...rest);
+  });
+  try {
+    expect(await run()).toMatchObject({
+      status: 200,
+      body: answer,
+      executed: true,
+    });
+    expect(records()[0]).toMatchObject({ phase: "done", responseKept: false });
+    // Even an entry found under its id is not this request's response.
+    const [[key]] = storedUnder(RECORD);
+    mocks.store.set(
+      RESPONSE + key.slice(RECORD.length),
+      gzipSync(JSON.stringify({ status: 200, body: "another run" })),
+    );
+    expect(await run()).toMatchObject({ status: 409, executed: false });
+    expect(executions()).toHaveLength(1);
+  } finally {
+    mocks.redis.set.mockImplementation(set);
+  }
+});
+
+it("completes the request when neither the cache write nor its cleanup lands", async () => {
+  const set = mocks.redis.set.getMockImplementation()!;
+  mocks.redis.set.mockImplementation(async (key, ...rest) => {
+    if (String(key).startsWith(RESPONSE)) throw new Error("Redis unavailable");
+    return set(key, ...rest);
+  });
+  const del = mocks.redis.del.getMockImplementation()!;
+  const cleanup = vi.fn();
+  mocks.redis.del.mockImplementation(async key => {
+    if (!String(key).startsWith(RESPONSE)) return del(key);
+    cleanup();
+    throw new Error("Redis unavailable");
+  });
+  try {
+    expect(await run()).toMatchObject({ status: 200, executed: true });
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(records()[0]).toMatchObject({ phase: "done", responseKept: false });
+  } finally {
+    mocks.redis.set.mockImplementation(set);
+    mocks.redis.del.mockImplementation(del);
+  }
 });
 
 describe("providers whose responses are not kept", () => {
@@ -1049,8 +1223,8 @@ describe("providers whose responses are not kept", () => {
         lockId: "held",
         maximumCredits: 5,
       });
-      expect(JSON.stringify(record)).not.toContain("provider body");
-      expect(record.response.body).toEqual({
+      expect(everythingStored()).not.toContain("provider body");
+      expect(cachedResponses()[0].body).toEqual({
         success: true,
         creditsCost: 4,
         results: [notRetained(restricted.provider, restricted.capability)],
@@ -1083,8 +1257,7 @@ describe("providers whose responses are not kept", () => {
       body: answered,
       executed: true,
     });
-    const record = stored();
-    expect(JSON.stringify(record)).not.toMatch(/particle body|apollo body/);
+    expect(everythingStored()).not.toMatch(/particle body|apollo body/);
     const replayed = {
       success: true,
       creditsCost: 5,
@@ -1094,7 +1267,7 @@ describe("providers whose responses are not kept", () => {
         notRetained("apollo", "people/match"),
       ],
     };
-    expect(record.response.body).toEqual(replayed);
+    expect(cachedResponses()[0].body).toEqual(replayed);
     const before = charges();
 
     const replay = await run({ calls });
@@ -1136,8 +1309,8 @@ describe("providers whose responses are not kept", () => {
       });
       const record = stored();
       expect(record).toMatchObject({ phase: "done", maximumCredits: 5 });
-      expect(JSON.stringify(record)).not.toContain("enriched");
-      expect(record.response.body).toEqual({
+      expect(everythingStored()).not.toContain("enriched");
+      expect(cachedResponses()[0].body).toEqual({
         success: true,
         creditsCost: 4,
         results: [notRetained("firecrawl", capability)],
@@ -1166,12 +1339,12 @@ describe("providers whose responses are not kept", () => {
     };
     exchangeAnswers(answered);
     await run({ calls: [other] });
-    expect(stored().response).toEqual({ status: 200, body: answered });
+    expect(cachedResponses()).toEqual([{ status: 200, body: answered }]);
   });
 
   it("keeps an unrestricted provider's response whole and replays it without charging again", async () => {
     await run();
-    expect(stored().response).toEqual({ status: 200, body: answer });
+    expect(cachedResponses()).toEqual([{ status: 200, body: answer }]);
     const before = charges();
     expect(await run()).toMatchObject({
       status: 200,
@@ -1191,6 +1364,7 @@ describe("providers whose responses are not kept", () => {
     const record = stored();
     expect(record).toMatchObject({ phase: "done", responseWithheld: true });
     expect(record).not.toHaveProperty("response");
+    expect(cachedResponses()).toEqual([]);
     const before = charges();
     const replay = await run({ calls: [particle], zeroDataRetention: true });
     expect(replay).toMatchObject({ status: 409, executed: false });

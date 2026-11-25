@@ -1,6 +1,6 @@
-import { config } from "../config";
-import { localHangarRequest } from "./local-hangar";
+import { browserEnv } from "./browser-env";
 import { type BrowserOptions, hangarBrowserOptions } from "./browser-options";
+import { localHangarRequest } from "./local-hangar";
 
 export interface HangarBrowser {
   id: string;
@@ -56,18 +56,26 @@ async function request<T>(
     resource?: "browsers" | "profiles";
   },
 ): Promise<T> {
-  if (!config.HANGAR_URL)
+  const local = Boolean(process.env.SELF_HOSTED_BROWSER_SOCKET);
+  const url = browserEnv.HANGAR_URL;
+  if (!local && !url)
     throw new HangarError(
       503,
       "Browser feature is not configured (HANGAR_URL is missing).",
     );
   let response: globalThis.Response;
   try {
-    response = process.env.SELF_HOSTED_BROWSER_SOCKET
-      ? await localHangarRequest(method, `/v1/${options?.resource ?? "browsers"}${path}`, body, options?.key, options?.timeout)
-      : await fetch(
-      `${config.HANGAR_URL.replace(/\/$/, "")}/v1/${options?.resource ?? "browsers"}${path}`,
-      {
+    const endpoint = `/v1/${options?.resource ?? "browsers"}${path}`;
+    if (local) {
+      response = await localHangarRequest(
+        method,
+        endpoint,
+        body,
+        options?.key,
+        options?.timeout,
+      );
+    } else {
+      response = await fetch(`${url?.replace(/\/$/, "")}${endpoint}`, {
         method,
         headers: {
           "Content-Type": "application/json",
@@ -75,8 +83,8 @@ async function request<T>(
         },
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: AbortSignal.timeout(options?.timeout ?? 40_000),
-      },
-    );
+      });
+    }
   } catch {
     throw new HangarError(502, "Hangar is unavailable.");
   }

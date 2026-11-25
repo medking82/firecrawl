@@ -5,16 +5,16 @@ import { logger as _logger } from "../../lib/logger";
 import {
   Document,
   FormatObject,
+  getV2RequestSchemas,
   ParseRequest,
   RequestWithAuth,
   ScrapeResponse,
   UploadedParseFile,
   UploadedParseFileKind,
-  parseRequestSchema,
 } from "./types";
 import { v7 as uuidv7 } from "uuid";
 import { hasFormatOfType } from "../../lib/format-utils";
-import { isTransportableError } from "../../lib/error";
+import { getErrorHttpResponse, isTransportableError } from "../../lib/error";
 import { NuQJob } from "../../services/worker/nuq";
 import { checkPermissions } from "../../lib/permissions";
 import { withSpan, setSpanAttributes, SpanKind } from "../../lib/otel-tracer";
@@ -25,7 +25,7 @@ import { getJobPriority } from "../../lib/job-priority";
 import { logRequest } from "../../services/logging/log_job";
 import { externalRequestId } from "../../lib/external-request-id";
 import { requestContext } from "../../lib/request-context";
-import { getErrorContactMessage } from "../../lib/deployment";
+import { service } from "../../service";
 import type { BillingMetadata } from "../../services/billing/types";
 import { getScrapeZDR } from "../../lib/zdr-helpers";
 import {
@@ -325,7 +325,7 @@ export async function parseController(
       });
 
       await withSpan("api.parse.validate", async validateSpan => {
-        req.body = parseRequestSchema.parse(req.body);
+        req.body = getV2RequestSchemas().parse.parse(req.body);
         setSpanAttributes(validateSpan, {
           "validation.success": true,
         });
@@ -619,6 +619,8 @@ export async function parseController(
           "parse.error_type": isTransportableError(e) ? e.code : "unknown",
         });
 
+        const jobIdField = agentRequestId ? {} : { jobId };
+
         if (isTransportableError(e)) {
           if (!timeoutErr) {
             logger.error("Error in parseController", {
@@ -627,27 +629,17 @@ export async function parseController(
             });
           }
 
-          if (e.code === "SCRAPE_NO_CACHED_DATA") {
+          const httpResponse = getErrorHttpResponse(e);
+          if (httpResponse) {
             setSpanAttributes(span, {
-              "parse.status_code": 404,
+              "parse.status_code": httpResponse.status,
             });
-            return res.status(404).json({
+            return res.status(httpResponse.status).json({
+              ...httpResponse.extraFields,
               success: false,
               code: e.code,
               error: e.message,
-            });
-          }
-
-          if (e.code === "AGENT_INDEX_ONLY") {
-            setSpanAttributes(span, {
-              "parse.status_code": 403,
-            });
-            return res.status(403).json({
-              success: false,
-              code: e.code,
-              error: e.message,
-              sponsor_status: "pending",
-              login_url: "https://firecrawl.dev/signin",
+              ...jobIdField,
             });
           }
 
@@ -659,20 +651,7 @@ export async function parseController(
               success: false,
               code: e.code,
               error: e.message,
-            });
-          }
-
-          if (
-            e.code === "US_ONLY_UNAVAILABLE" ||
-            e.code === "RESERVED_CAPACITY_UNAVAILABLE"
-          ) {
-            setSpanAttributes(span, {
-              "parse.status_code": 403,
-            });
-            return res.status(403).json({
-              success: false,
-              code: e.code,
-              error: e.message,
+              ...jobIdField,
             });
           }
 
@@ -684,6 +663,7 @@ export async function parseController(
             success: false,
             code: e.code,
             error: e.message,
+            ...jobIdField,
           });
         } else {
           const id = uuidv7();
@@ -701,7 +681,8 @@ export async function parseController(
           return res.status(500).json({
             success: false,
             code: "UNKNOWN_ERROR",
-            error: getErrorContactMessage(id),
+            error: service.modules.messages.errorContact(id),
+            ...jobIdField,
           });
         }
       } finally {
