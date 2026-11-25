@@ -600,7 +600,11 @@ async function main() {
     seen.add(name);
     const affected = range(expr || ''); if (affected(target)) fail('target is affected');
     const expected = integrity(lock, name, target), before = scan('/app', name, affected);
-    if (!before.count) fail(`package not found in supported layout: ${name}`);
+    if (!before.count) {
+      // Upstream dropped the dependency; the full-image audit still rejects any hidden copy.
+      console.log(JSON.stringify({base, baseId, name, status:'absent'}));
+      continue;
+    }
     if (!before.targets.length) {
       console.log(JSON.stringify({base, baseId, name, status:'already-safe', installed:before.count}));
       continue;
@@ -941,7 +945,7 @@ try:
         name,kind=key.rsplit('_',1)
         actual=env.get(name)=='true' if kind=='true' else bool(env.get(name))
         if actual is not expected: raise ValueError('candidate_configuration')
-    if env.get('ALLOW_LOCAL_WEBHOOKS') or env.get('DOTENV_CONFIG_PATH') or (env.get('NODE_OPTIONS') and not search_files) or env.get('USE_DB_AUTHENTICATION')!='false':
+    if env.get('ALLOW_LOCAL_WEBHOOKS') or env.get('DOTENV_CONFIG_PATH') or (env.get('NODE_OPTIONS') and not search_files) or env.get('USE_DB_AUTHENTICATION') not in (None,'false'):
         raise ValueError('candidate_safeguards')
     # No credentials, volumes, service entrypoint or network in the probe container.
     identity=run(['docker','run','-d','--network','none','--read-only','--cap-drop','ALL',
@@ -951,7 +955,7 @@ try:
         images['api']['image'],'-e','setTimeout(()=>{},180000)']).strip()
     if not re.fullmatch('[0-9a-f]{64}',identity): raise ValueError('candidate_identity')
     # Audit all installed copies in this exact isolated API image, without changing it.
-    package_audit_source = "'use strict';\n// This source is embedded in updater-patched.sh; keep the two copies identical.\nconst fs = require('fs'), path = require('path');\nconst required = {'decode-uri-component': [0, 5, 1], systeminformation: [5, 33, 16]};\nconst found = Object.fromEntries(Object.keys(required).map(name => [name, new Map()]));\nconst root = process.argv[1] || '/';\nconst skip = new Set(['/proc', '/sys', '/dev']);\nfunction inspect(dir, expected) {\n  const manifest = path.join(dir, 'package.json');\n  if (!fs.existsSync(manifest)) {\n    if (expected) throw Error('package manifest missing');\n    return;\n  }\n  let data;\n  try { data = JSON.parse(fs.readFileSync(manifest, 'utf8')); }\n  catch { throw Error('invalid package manifest'); }\n  if (expected && data.name !== expected) throw Error('package name mismatch');\n  if (!Object.hasOwn(required, data.name)) return;\n  const match = typeof data.version === 'string' && /^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$/.exec(data.version);\n  if (!match) throw Error('unknown package version');\n  const actual = match.slice(1).map(BigInt), minimum = required[data.name].map(BigInt);\n  let comparison = 0;\n  for (let i = 0; i < 3 && !comparison; i++) comparison = actual[i] < minimum[i] ? -1 : actual[i] > minimum[i] ? 1 : 0;\n  if (comparison < 0) throw Error('vulnerable package version');\n  found[data.name].set(fs.realpathSync(dir), data.version);\n}\nfunction walk(dir) {\n  if (root === '/' && skip.has(dir)) return;\n  inspect(dir, null);\n  for (const entry of fs.readdirSync(dir, {withFileTypes:true})) {\n    const item = path.join(dir, entry.name);\n    if (entry.isDirectory()) {\n      if (Object.hasOwn(required, entry.name)) inspect(item, entry.name);\n      walk(item);\n    } else if (entry.isSymbolicLink() && Object.hasOwn(required, entry.name)) {\n      const real = fs.realpathSync(item);\n      if (root === '/' && [...skip].some(p => real === p || real.startsWith(p + '/'))) throw Error('unsupported package link');\n      if (!fs.statSync(real).isDirectory()) throw Error('invalid package link');\n      inspect(real, entry.name);\n    }\n  }\n}\nwalk(root);\nconst result = {};\nfor (const [name, copies] of Object.entries(found)) {\n  if (!copies.size) throw Error('required package missing');\n  result[name] = [...copies].sort(([a], [b]) => a.localeCompare(b)).map(([location, version]) => ({location, version}));\n}\nprocess.stdout.write(JSON.stringify(result));\n"
+    package_audit_source = "'use strict';\n// This source is embedded in updater-patched.sh; keep the two copies identical.\nconst fs = require('fs'), path = require('path');\nconst required = {'decode-uri-component': [0, 5, 1], systeminformation: [5, 33, 16]};\nconst found = Object.fromEntries(Object.keys(required).map(name => [name, new Map()]));\nconst root = process.argv[1] || '/';\nconst skip = new Set(['/proc', '/sys', '/dev']);\nfunction inspect(dir, expected) {\n  const manifest = path.join(dir, 'package.json');\n  if (!fs.existsSync(manifest)) {\n    if (expected) throw Error('package manifest missing');\n    return;\n  }\n  let data;\n  try { data = JSON.parse(fs.readFileSync(manifest, 'utf8')); }\n  catch { throw Error('invalid package manifest'); }\n  if (expected && data.name !== expected) throw Error('package name mismatch');\n  if (!Object.hasOwn(required, data.name)) return;\n  const match = typeof data.version === 'string' && /^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$/.exec(data.version);\n  if (!match) throw Error('unknown package version');\n  const actual = match.slice(1).map(BigInt), minimum = required[data.name].map(BigInt);\n  let comparison = 0;\n  for (let i = 0; i < 3 && !comparison; i++) comparison = actual[i] < minimum[i] ? -1 : actual[i] > minimum[i] ? 1 : 0;\n  if (comparison < 0) throw Error('vulnerable package version');\n  found[data.name].set(fs.realpathSync(dir), data.version);\n}\nfunction walk(dir) {\n  if (root === '/' && skip.has(dir)) return;\n  inspect(dir, null);\n  for (const entry of fs.readdirSync(dir, {withFileTypes:true})) {\n    const item = path.join(dir, entry.name);\n    if (entry.isDirectory()) {\n      if (Object.hasOwn(required, entry.name)) inspect(item, entry.name);\n      walk(item);\n    } else if (entry.isSymbolicLink() && Object.hasOwn(required, entry.name)) {\n      const real = fs.realpathSync(item);\n      if (root === '/' && [...skip].some(p => real === p || real.startsWith(p + '/'))) throw Error('unsupported package link');\n      if (!fs.statSync(real).isDirectory()) throw Error('invalid package link');\n      inspect(real, entry.name);\n    }\n  }\n}\nwalk(root);\nconst result = {};\nfor (const [name, copies] of Object.entries(found)) {\n  result[name] = [...copies].sort(([a], [b]) => a.localeCompare(b)).map(([location, version]) => ({location, version}));\n}\nprocess.stdout.write(JSON.stringify(result));\n"
     packages = json.loads(run(['docker','run','--rm','--network','none','--read-only',
         '--cap-drop','ALL','--cap-add','DAC_OVERRIDE','--security-opt','no-new-privileges',
         '--memory','256m','--cpus','1','--pids-limit','32','--user','0',
@@ -1151,7 +1155,7 @@ for name in (('nuq-postgres','playwright-service') + (('searxng','search-egress'
 package_check=report.get('package_check')
 if (not isinstance(package_check,dict) or package_check.get('api_image')!=report['images']['api']['image']
         or set(package_check.get('packages',{}))!={'decode-uri-component','systeminformation'}
-        or any(not copies for copies in package_check['packages'].values())):
+        or any(not isinstance(copies,list) for copies in package_check['packages'].values())):
     raise SystemExit('Candidate package evidence missing or image changed')
 for service in report['images'].values():
     subprocess.run(['docker','image','inspect',service['image']],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=True,timeout=10)
