@@ -30,10 +30,20 @@ class Stalling(http.server.BaseHTTPRequestHandler):
         pass
 
     def do_POST(self):
-        self.rfile.read(int(self.headers.get('Content-Length', 0)))
+        body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', 0))))
         mode = self.server.mode
         start = time.monotonic()
-        if mode == 'ok':
+        if mode in ('v1-removed', 'v1-error'):
+            self.server.requests.append((self.path, body))
+        if self.path == '/v1/search' and mode in ('v1-removed', 'v1-error'):
+            raw = (b'<pre>Cannot POST /v1/search</pre>' if mode == 'v1-removed'
+                   else b'{"success":false,"error":"search not found"}')
+            self.send_response(404)
+            self.send_header('Content-Length', str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+            return
+        if mode in ('ok', 'v1-removed'):
             raw = json.dumps({'success': True, 'data': {'web': [GOOD]}}).encode()
             self.send_response(200)
             self.send_header('Content-Length', str(len(raw)))
@@ -68,6 +78,7 @@ class DeadlineTests(unittest.TestCase):
     def setUpClass(cls):
         cls.backend = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Stalling)
         cls.backend.mode, cls.backend.closed_after = 'stall', []
+        cls.backend.requests = []
         cls.fallback_rows = [GOOD]
         cls.fallback_calls = []
 
@@ -99,20 +110,39 @@ class DeadlineTests(unittest.TestCase):
 
     def setUp(self):
         self.backend.closed_after.clear()
+        self.backend.requests.clear()
         self.fallback_calls.clear()
         type(self).fallback_rows = [GOOD]
         proxy.policy.controls.CONTROL.cache.clear()
 
-    def search(self, query, headers=None):
+    def search(self, query, headers=None, path='/v2/search'):
         connection = http.client.HTTPConnection(*self.server.server_address, timeout=30)
         raw = json.dumps({'query': query, 'limit': 3}).encode()
         start = time.monotonic()
-        connection.request('POST', '/v2/search', raw, {
+        connection.request('POST', path, raw, {
             'Content-Type': 'application/json', 'Cache-Control': 'no-cache', **(headers or {})})
         response = connection.getresponse()
         body = json.loads(response.read())
         connection.close()
         return response.status, body, time.monotonic() - start
+
+    def test_v1_search_uses_v2_when_core_removed_route(self):
+        self.backend.mode = 'v1-removed'
+        status, body, _ = self.search('legacy query', path='/v1/search')
+        self.assertEqual(status, 200)
+        self.assertEqual(body['data'], [GOOD])
+        self.assertEqual(self.backend.requests, [
+            ('/v1/search', {'query': 'legacy query', 'limit': 3}),
+            ('/v2/search', {'query': 'legacy query', 'limit': 3, 'sources': ['web']}),
+        ])
+        self.assertEqual(self.fallback_calls, [])
+
+    def test_v1_search_preserves_backend_404(self):
+        self.backend.mode = 'v1-error'
+        status, body, _ = self.search('legacy error query', path='/v1/search')
+        self.assertEqual(status, 404)
+        self.assertEqual(body['error'], 'search not found')
+        self.assertEqual([path for path, _ in self.backend.requests], ['/v1/search'])
 
     def wait_backend_closed(self, limit=3.0):
         end = time.monotonic() + limit

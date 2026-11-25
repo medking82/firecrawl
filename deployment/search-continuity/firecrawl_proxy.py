@@ -245,12 +245,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if parent is not None else transport.Budget(backend_timeout(body))
         connection = None
         try:
+            path = getattr(self, 'search_path', '/v2/search')
             connection = transport.LoopbackConnection(self.server.backend[1], stage)
-            raw = json.dumps(body).encode()
             headers = self.forward_headers()
             headers['Content-Type'] = 'application/json'
-            connection.request('POST', getattr(self, 'search_path', '/v2/search'), body=raw, headers=headers)
+            connection.request('POST', path, body=json.dumps(body).encode(), headers=headers)
             response = connection.getresponse()
+            if path == '/v1/search' and response.status == 404:
+                missing_route = read_bounded(response, stage, MAX_JSON, 'backend_error_response_too_large', 502)
+                if b'<pre>Cannot POST /v1/search</pre>' not in missing_route:
+                    raise BackendReply(response.status, response.getheaders(), missing_route)
+                connection.close()
+                connection = transport.LoopbackConnection(self.server.backend[1], stage)
+                request = {'limit': 5, **body, 'sources': ['web']}
+                request.pop('__searchPreviewToken', None)
+                connection.request('POST', '/v2/search', body=json.dumps(request).encode(), headers=headers)
+                response = connection.getresponse()
             if 400 <= response.status < 500 and response.status not in (408, 429):
                 raw_error = read_bounded(response, stage, MAX_JSON, 'backend_error_response_too_large', 502)
                 raise BackendReply(response.status, response.getheaders(), raw_error)
@@ -259,8 +269,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                            429 if response.status == 429 else 503)
             raw = read_bounded(response, stage, MAX_JSON, 'primary_response_too_large', 503)
             result = json.loads(raw)
-            if getattr(self, 'search_path', '/v2/search') == '/v1/search' and isinstance(result, dict) and isinstance(result.get('data'), list):
-                result['data'] = {'web': result['data']}
+            if path == '/v1/search' and isinstance(result, dict):
+                if isinstance(result.get('data'), list):
+                    result['data'] = {'web': result['data']}
+                if 'jobId' in result and 'id' not in result:
+                    result['id'] = result.pop('jobId')
             return result
         except TimeoutError:
             # Stage expiry still leaves the entry budget for fallback; entry
