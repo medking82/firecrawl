@@ -229,7 +229,7 @@ smoke_test() {
 
   # Run only Firecrawl-owned checks against the self-hosted loopback endpoint.
   python3 -B - "$guard_file" "$guard_sha256" 'http://127.0.0.1:3002' <<'PYSMOKE'
-import hashlib, json, os, stat, sys, time, types, urllib.request
+import hashlib, json, os, stat, sys, time, types, urllib.error, urllib.request
 from pathlib import Path
 
 # BEGIN SEARCH CONTRACT (generated from search_runtime_contract.py)
@@ -418,8 +418,25 @@ try:
         if not isinstance(result, dict) or not isinstance(result.get('web'), list) or not result['web']:
             raise ValueError()
     def scrape():
-        result = post('/v2/scrape', {'url':'https://example.com','formats':['markdown'],
-                      'fastMode':True,'timeout':60000,'maxAge':0,'storeInCache':False})
+        body = {'url':'https://example.com','formats':['markdown'],
+                'fastMode':True,'timeout':60000,'maxAge':0,'storeInCache':False}
+        try:
+            result = post('/v2/scrape', body)
+        except urllib.error.HTTPError as error:
+            if error.code != 400:
+                raise
+            with error:
+                reply = json.loads(error.read(65536))
+            details = reply.get('details') if isinstance(reply, dict) and reply.get('code') == 'BAD_REQUEST' else None
+            if not isinstance(details, list) or len(details) != 1 or not isinstance(details[0], dict):
+                raise
+            issue = details[0]
+            keys = issue.get('keys')
+            if (issue.get('code') != 'unrecognized_keys' or issue.get('path') != []
+                    or not isinstance(keys, list) or not keys
+                    or any(key not in ('maxAge', 'storeInCache') for key in keys)):
+                raise
+            result = post('/v2/scrape', {key:value for key,value in body.items() if key not in keys})
         if (not isinstance(result, dict) or not isinstance(result.get('markdown'), str)
                 or not result['markdown'].strip() or (result.get('metadata') or {}).get('statusCode') != 200):
             raise ValueError()

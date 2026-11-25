@@ -107,16 +107,23 @@ class ResearchUpdaterTests(unittest.TestCase):
             guard.write_text('def verify():\n    return {"verified": True}\n'); guard.chmod(0o600)
             digest = hashlib.sha256(guard.read_bytes()).hexdigest()
             calls = []
+            removed_fields = []
             class Handler(http.server.BaseHTTPRequestHandler):
                 def do_POST(self):
                     data = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
                     calls.append((self.path, data))
+                    status = 200
+                    unknown = [key for key in removed_fields if key in data]
                     if self.path == '/v2/search':
                         payload = {'success':True,'data':{'web':[{'url':'https://example.com'}]}}
+                    elif unknown:
+                        status = 400
+                        payload = {'success':False,'code':'BAD_REQUEST','details':[
+                            {'code':'unrecognized_keys','keys':unknown,'path':[]}]}
                     else:
                         payload = {'success':True,'data':{'markdown':'sample','metadata':{'statusCode':200}}}
                     raw = json.dumps(payload).encode()
-                    self.send_response(200); self.send_header('Content-Length',str(len(raw)))
+                    self.send_response(status); self.send_header('Content-Length',str(len(raw)))
                     self.end_headers(); self.wfile.write(raw)
                 def log_message(self, *_): pass
             server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
@@ -134,13 +141,20 @@ class ResearchUpdaterTests(unittest.TestCase):
             self.assertEqual([path for path,_ in calls],['/v2/search','/v2/scrape'])
             self.assertEqual({key:calls[1][1][key] for key in ('fastMode','maxAge','storeInCache')},
                              {'fastMode':True,'maxAge':0,'storeInCache':False})
+            removed_fields.extend(['maxAge', 'storeInCache'])
+            calls.clear()
+            result = subprocess.run(args,capture_output=True,text=True,timeout=10,env=env)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertEqual([path for path,_ in calls],['/v2/search','/v2/scrape','/v2/scrape'])
+            self.assertEqual(calls[-1][1], {'url':'https://example.com','formats':['markdown'],
+                                            'fastMode':True,'timeout':60000})
             guard.write_text('def verify():\n    return {"verified": False}\n')
             self.assertNotEqual(subprocess.run(args,capture_output=True,text=True,timeout=10,env=env).returncode,0)
             args[5] = hashlib.sha256(guard.read_bytes()).hexdigest()
             failure = subprocess.run(args,capture_output=True,text=True,timeout=10,env=env)
             self.assertNotEqual(failure.returncode,0)
             self.assertIn('guard_rejected',failure.stderr)
-            self.assertEqual(len(calls),2)
+            self.assertEqual(len(calls),3)
 
     def test_smoke_retries_external_search_refusals_but_not_forever(self):
         body = SOURCE.read_text().split("<<'PYSMOKE'\n", 1)[1].split('\nPYSMOKE', 1)[0]

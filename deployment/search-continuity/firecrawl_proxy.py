@@ -73,6 +73,23 @@ def legacy_search_route_missing(raw):
             and error.get('error') == 'POST /v1/search is not a Firecrawl API endpoint.')
 
 
+def removed_no_cache_fields(raw, options):
+    try:
+        reply = json.loads(raw)
+    except (ValueError, UnicodeError):
+        return []
+    details = reply.get('details') if isinstance(reply, dict) and reply.get('code') == 'BAD_REQUEST' else None
+    if not isinstance(details, list) or len(details) != 1 or not isinstance(details[0], dict):
+        return []
+    issue = details[0]
+    keys = issue.get('keys')
+    if (issue.get('code') != 'unrecognized_keys' or issue.get('path') != []
+            or not isinstance(keys, list) or not keys
+            or any(not isinstance(key, str) or key not in options for key in keys)):
+        return []
+    return keys
+
+
 def service_route(path):
     for name, prefixes in (('monitor', ('/v2/monitor',)), ('browser', ('/v2/browser', '/v2/interact'))):
         if any(path == p or path.startswith(p + '/') for p in prefixes):
@@ -449,6 +466,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                encode_chunked=raw is None and 'Content-Length' not in headers)
             response = connection.getresponse()
             first = b''
+            if record and response.status == 400:
+                no_cache = set()
+                if type(body.get('maxAge')) is int and body['maxAge'] == 0:
+                    no_cache.add('maxAge')
+                if body.get('storeInCache') is False:
+                    no_cache.add('storeInCache')
+                if no_cache:
+                    first = response.read(MAX_JSON + 1)
+                    removed = removed_no_cache_fields(first, no_cache)
+                    if removed:
+                        connection.close()
+                        connection = http.client.HTTPConnection(*backend, timeout=timeout)
+                        payload = json.dumps({key: value for key, value in body.items() if key not in removed}).encode()
+                        connection.request(self.command, target, body=payload, headers=headers)
+                        response = connection.getresponse()
+                        first = b''
             if record and response.status == 200:
                 # Buffer the scrape reply once to learn its ID; bytes are sent unchanged.
                 first = response.read(MAX_JSON + 1)
