@@ -1,0 +1,49 @@
+{
+  "schema": 2,
+  "profile": "v2.11.864",
+  "scope": "Public static-fetch, service engine selection, and disabled Exchange file routes with the existing deployment predicates.",
+  "source_commit": "0519b26a2b73c13048c0d29bce12c0306f7601ec",
+  "baseline_profile": "v2.11.831",
+  "candidate_api_image": "sha256:7c8ad1abdb1065e2654587d578843529016f739f45abed130ef9fe89f45fa9d7",
+  "export_archive_sha256": "b8dced8ccc412fcb91695e8a726f19065697b462a8994804c9319ffcdff97b4b",
+  "dependencies": {
+    "node_major": 22,
+    "undici": "7.30.1",
+    "ipaddr_js": "2.2.0"
+  },
+  "undici_lib_sha256": "213bda9bf7c6860b6714484b606b431c7bdbe4652a20be22e3e20e8b96e1187c",
+  "dependency_tree_counts": {"undici_lib": 116},
+  "hash_overrides": {
+    "/app/dist/src/scraper/scrapeURL/engines/index.js": "2434fd66833c7700b942e19801c6592d44db33f51b58a868c89a7fbec8b4deb3",
+    "/app/dist/src/scraper/scrapeURL/index.js": "5a6015974a1c1d82aa3105c8ef4242e1d5f12ae0afea0162ca316e3a87586385",
+    "/app/dist/src/controllers/v2/types.js": "10209659000bb43c542715a7707ea37ed9ff1b56d738050ac2ed9a4659000fb9",
+    "/app/dist/src/lib/exchange.js": "d5768e5f4bbfa81f56430d4a3cc5090c5027fafd449da979abdaccc0ac8fde13"
+  },
+  "syntax_overrides": {
+    "/app/dist/src/scraper/scrapeURL/engines/index.js": "98c7526836c98a03deaace246c70b46d2471de36800f43854d769e25ac0547ae",
+    "/app/dist/src/scraper/scrapeURL/index.js": "c74bed721a79348b6654be99eb8b483896c69881c309e4df35e2ef998b4eff8c",
+    "/app/dist/src/controllers/v2/types.js": "82a0fc1ba8d47c19e92e7471b5e0717986a9f62274d5004dbe18213518571812",
+    "/app/dist/src/lib/exchange.js": "007a7ef01ecc12cf643e86baf9e2b19de1ca067821f0a235f62cba056f5676fb",
+    "/app/dist/src/config.js": "598bbce8b5a560505884d8589d7460e7f21ed423d652c6852781efeee3677bbc",
+    "/app/dist/src/index.js": "503fbc61fff746cbd77f5668b32fdcf79624c20abc074ae10460dcabc9c98e37",
+    "/app/dist/src/routes/exchange-files.js": "ab943777f0a07a9b8f1270bef445407ce4d37821cead17755f6672fe837c82bd",
+    "/app/dist/src/scraper/scrapeURL/error.js": "d6ae940e5d741ff92f3c0ba684d654c854753d11ed5c368efdf9eb10d58d2898",
+    "/app/dist/src/main.js": "c895e807064762bdfc3855ebfec9a09b542f821c2db56b5d06f14f5b1a3701fd",
+    "/app/dist/src/harness.js": "0fcf49c5c67807c55259400986240b4d59927e6d244ab0d2c448fc81d9e47387",
+    "/app/dist/src/service/core-parts.js": "f3d10f533564e6713682f2482012aaa73cfaf55e30b5f393dc6f6241819eb13e",
+    "/app/dist/src/service/engines.js": "35083126a3855123dd51c95dd0c3fff3182e9aa495b3531a046d5283ff3e856a",
+    "/app/dist/src/service/service.js": "eb5d74815f0a986ca00603f5939672b1e701e58243974fb85a71591029eebfde",
+    "/app/dist/src/service/defaults.js": "0710d0455d9d4dfd5390309edb9b40b991f2e68f2ae767d2b3d98545d22d3c56",
+    "/app/dist/src/service/hooks.js": "56376b69169bb584b4e0c00fd9f835c024f496d50dfacb7a901db1dd22283369",
+    "/app/dist/src/service/request.js": "004234326bdfb4f268ff31f1713649beddc6ebfbf1fb5ac1594297bde19d7023",
+    "/app/dist/src/scraper/scrapeURL/hooks.js": "38a9a9820584e6b3ecbc7938df8f6113234f574462f4ba57dd4ffa4324d74ebe",
+    "/app/dist/src/lib/api-startup.js": "8f34bcf1aa17f8f055fb5b03c168ab3e194e111f0a6e97eb99f4393978302933",
+    "/app/dist/src/lib/exchange-errors.js": "1a27512c5e4bd41c00d734c8d515d806977ec74ec321febcc25001ec61381160"
+  },
+  "audit": [
+    "The harness starts the core service with built-in engine registrations and default module slots. Engine selection and request-schema contributions now use this service; the default startup does not register custom scrape hooks.",
+    "The static fetch, download, PDF and document transport files retained their prior fingerprints. The Undici library tree retained all 116 paths and the same digest.",
+    "Exchange error serialization moved to an independent module. The Exchange engine and file routes still require FIRE_EXCHANGE_URL; the deployment guard continues to require it unset.",
+    "PC Node 22.23.5 independently parsed 28 compiled files from the SHA-bound read-only image export. Eleven focused upstream suites passed 238 tests with the candidate's native artifacts."
+  ]
+}

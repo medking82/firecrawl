@@ -292,6 +292,40 @@ TRANSPORT_PROFILES["v2.11.831"] = {
         '/app/dist/src/scraper/scrapeURL/error.js': 'b72ad52e95007e3f921eebdf7d510bfdf9cc8662fd78b7aaada3e4dfcfc9c14b',
     },
 }
+_v831 = TRANSPORT_PROFILES["v2.11.831"]
+_build_root = "/app/dist/src/"
+TRANSPORT_PROFILES["v2.11.864"] = {
+    'receipt_sha256': '716e83bcfce8dd4b413ed06cc01168e1f3172b951a6a908684030f96b3217d93',
+    'dependencies': dict(_v831['dependencies']),
+    'undici_lib_sha256': _v831['undici_lib_sha256'],
+    'hashes': _v831['hashes'] | {
+        _build_root + 'scraper/scrapeURL/engines/index.js': '2434fd66833c7700b942e19801c6592d44db33f51b58a868c89a7fbec8b4deb3',
+        _build_root + 'scraper/scrapeURL/index.js': '5a6015974a1c1d82aa3105c8ef4242e1d5f12ae0afea0162ca316e3a87586385',
+        _build_root + 'controllers/v2/types.js': '10209659000bb43c542715a7707ea37ed9ff1b56d738050ac2ed9a4659000fb9',
+        _build_root + 'lib/exchange.js': 'd5768e5f4bbfa81f56430d4a3cc5090c5027fafd449da979abdaccc0ac8fde13',
+    },
+    'syntax_hashes': _v831['syntax_hashes'] | {
+        _build_root + 'scraper/scrapeURL/engines/index.js': '98c7526836c98a03deaace246c70b46d2471de36800f43854d769e25ac0547ae',
+        _build_root + 'scraper/scrapeURL/index.js': 'c74bed721a79348b6654be99eb8b483896c69881c309e4df35e2ef998b4eff8c',
+        _build_root + 'controllers/v2/types.js': '82a0fc1ba8d47c19e92e7471b5e0717986a9f62274d5004dbe18213518571812',
+        _build_root + 'lib/exchange.js': '007a7ef01ecc12cf643e86baf9e2b19de1ca067821f0a235f62cba056f5676fb',
+        _build_root + 'config.js': '598bbce8b5a560505884d8589d7460e7f21ed423d652c6852781efeee3677bbc',
+        _build_root + 'index.js': '503fbc61fff746cbd77f5668b32fdcf79624c20abc074ae10460dcabc9c98e37',
+        _build_root + 'routes/exchange-files.js': 'ab943777f0a07a9b8f1270bef445407ce4d37821cead17755f6672fe837c82bd',
+        _build_root + 'scraper/scrapeURL/error.js': 'd6ae940e5d741ff92f3c0ba684d654c854753d11ed5c368efdf9eb10d58d2898',
+        _build_root + 'main.js': 'c895e807064762bdfc3855ebfec9a09b542f821c2db56b5d06f14f5b1a3701fd',
+        _build_root + 'harness.js': '0fcf49c5c67807c55259400986240b4d59927e6d244ab0d2c448fc81d9e47387',
+        _build_root + 'service/core-parts.js': 'f3d10f533564e6713682f2482012aaa73cfaf55e30b5f393dc6f6241819eb13e',
+        _build_root + 'service/engines.js': '35083126a3855123dd51c95dd0c3fff3182e9aa495b3531a046d5283ff3e856a',
+        _build_root + 'service/service.js': 'eb5d74815f0a986ca00603f5939672b1e701e58243974fb85a71591029eebfde',
+        _build_root + 'service/defaults.js': '0710d0455d9d4dfd5390309edb9b40b991f2e68f2ae767d2b3d98545d22d3c56',
+        _build_root + 'service/hooks.js': '56376b69169bb584b4e0c00fd9f835c024f496d50dfacb7a901db1dd22283369',
+        _build_root + 'service/request.js': '004234326bdfb4f268ff31f1713649beddc6ebfbf1fb5ac1594297bde19d7023',
+        _build_root + 'scraper/scrapeURL/hooks.js': '38a9a9820584e6b3ecbc7938df8f6113234f574462f4ba57dd4ffa4324d74ebe',
+        _build_root + 'lib/api-startup.js': '8f34bcf1aa17f8f055fb5b03c168ab3e194e111f0a6e97eb99f4393978302933',
+        _build_root + 'lib/exchange-errors.js': '1a27512c5e4bd41c00d734c8d515d806977ec74ec321febcc25001ec61381160',
+    },
+}
 EXPECTED_PREDICATES = {
     "ALLOW_LOCAL_WEBHOOKS_true": False,
     "PROXY_SERVER_nonempty": False,

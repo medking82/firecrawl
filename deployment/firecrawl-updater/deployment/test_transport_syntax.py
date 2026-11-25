@@ -1,5 +1,6 @@
 """Check real JavaScript parsing and fail-closed syntax-equivalent admission."""
 import copy
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -17,6 +18,17 @@ spec.loader.exec_module(guard)
 
 
 class SyntaxAdmissionTests(unittest.TestCase):
+    def test_v864_profile_matches_reviewed_receipt(self):
+        contents = PATH.with_name('firecrawl-transport-20261126-v864.json').read_bytes()
+        receipt = json.loads(contents)
+        previous = guard.TRANSPORT_PROFILES[receipt['baseline_profile']]
+        current = guard.TRANSPORT_PROFILES[receipt['profile']]
+        self.assertEqual(current['receipt_sha256'], hashlib.sha256(contents).hexdigest())
+        self.assertEqual(current['hashes'], previous['hashes'] | receipt['hash_overrides'])
+        self.assertEqual(current['syntax_hashes'], previous['syntax_hashes'] | receipt['syntax_overrides'])
+        self.assertEqual(current['dependencies'], receipt['dependencies'])
+        self.assertEqual(current['undici_lib_sha256'], receipt['undici_lib_sha256'])
+
     def setUp(self):
         self.profile = copy.deepcopy(guard.TRANSPORT_PROFILES['v2.11.704'])
         self.profile['syntax_hashes'] = dict.fromkeys(self.profile['hashes'], 'a' * 64)
