@@ -35,6 +35,7 @@ DDG_BLOCK = 'html.duckduckgo.com:127.0.0.1'
 # Reviewed earlier sidecar worker releases that apply may upgrade and rollback may restore.
 PREVIOUS_SIDECAR_WORKERS = {
     '5d8b40a5cc067fed631015b78224cdf7068c6c261ee0482826c02f0086b101f1': 'sidecar-01286ab',
+    '4aa4bdf47eb3ce12b4f752e6d6b8fe1de9630d47675c86b515d5557a7dd71c34': 'sidecar-9c32e52d3',
 }
 
 

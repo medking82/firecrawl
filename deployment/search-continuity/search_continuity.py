@@ -200,9 +200,33 @@ def domain_matches(url, domains):
     return any(host == d or (host and host.endswith('.' + d)) for d in domains)
 
 
-def search(body, primary, fallback=exa_search, gate=FALLBACK_GATE, domain_filters=True):
+HINT_TOKEN = re.compile(r'(?:^|\s)fcctl:\S*')
+
+
+def add_search_hints(request):
+    """Carry tbs/country to the search sidecar inside the query.
+
+    The core's SearXNG provider drops both fields, so the sidecar worker reads
+    them from "fcctl:" tokens and removes the tokens before searching.
+    Client-supplied tokens are removed first; only validated values are added.
+    """
+    query = ' '.join(HINT_TOKEN.sub(' ', request['query']).split())
+    if not query:
+        raise SearchFailure('invalid_search_query', 400)
+    tokens = []
+    tbs, country = request.get('tbs'), request.get('country')
+    if isinstance(tbs, str) and re.fullmatch(r'[A-Za-z0-9:,/._-]{1,96}', tbs):
+        tokens.append('fcctl:tbs=' + tbs)
+    if isinstance(country, str) and re.fullmatch(r'[A-Za-z]{2}', country):
+        tokens.append('fcctl:country=' + country.lower())
+    request['query'] = ' '.join([query, *tokens])
+
+
+def search(body, primary, fallback=exa_search, gate=FALLBACK_GATE, domain_filters=True, hints=False):
     """Return Firecrawl v2 envelope with additive provenance; callbacks are bounded.
 
+    hints is True while the core searches through the sidecar worker; see
+    add_search_hints. Exa fallback always uses the client's original query.
     domain_filters is False for /v1/search, whose schema has no domain fields.
     The Baidu exclusion sent to the backend is only a hint: every returned row
     is filtered again here, so it is added only where the backend accepts it
@@ -229,6 +253,8 @@ def search(body, primary, fallback=exa_search, gate=FALLBACK_GATE, domain_filter
         request.pop('excludeDomains')
     if not request['includeDomains']:
         request.pop('includeDomains')
+    if hints:
+        add_search_hints(request)
     envelope, reason, explicit_empty = None, 'primary_unavailable', False
     try:
         envelope = primary(request)

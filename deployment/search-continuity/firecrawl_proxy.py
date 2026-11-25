@@ -37,6 +37,11 @@ def _load_transport():
 transport = _load_transport()
 
 BACKEND = ('127.0.0.1', 3002)
+# The core searches through the sidecar worker when its override points the
+# SearXNG provider there (deployment/search-sidecar); only then may the query
+# carry search hints. Rolling the override back turns hints off with it.
+COMPOSE_OVERRIDE = Path('/home/marck/github/firecrawl/docker-compose.override.yaml')
+SIDECAR_ENDPOINT = re.compile(r'(?m)^\s*SEARXNG_ENDPOINT:\s*["\']?http://search-worker:8081/?["\']?\s*$')
 HOP = {'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
        'te', 'trailer', 'transfer-encoding', 'upgrade'}
 MAX_JSON = 64 * 1024 * 1024
@@ -297,7 +302,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 try:
                     budget.remaining()  # admission wait counts against the same ceiling
                     return policy.search(body, self.primary, fallback=fallback, gate=self.server.fallback_gate,
-                                         domain_filters=getattr(self, 'search_path', '/v2/search') != '/v1/search')
+                                         domain_filters=getattr(self, 'search_path', '/v2/search') != '/v1/search',
+                                         hints=self.server.search_hints())
                 except TimeoutError:
                     raise policy.SearchFailure(budget.reason or 'search_deadline', 504) from None
             try:
@@ -484,6 +490,17 @@ class Server(http.server.ThreadingHTTPServer):
         self.replay_lock = threading.Lock()
         self.fallback_gate = policy.FallbackGate()
         self.slots = threading.BoundedSemaphore(16)
+        self.hint_state = (None, False)
+
+    def search_hints(self):
+        try:
+            info = COMPOSE_OVERRIDE.stat()
+            key = (info.st_mtime_ns, info.st_size, info.st_ino)
+            if self.hint_state[0] != key:
+                self.hint_state = (key, bool(SIDECAR_ENDPOINT.search(COMPOSE_OVERRIDE.read_text())))
+            return self.hint_state[1]
+        except (OSError, UnicodeError):
+            return False
 
     def process_request(self, request, address):
         if not self.slots.acquire(blocking=False):

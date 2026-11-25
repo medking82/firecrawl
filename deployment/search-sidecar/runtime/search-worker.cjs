@@ -12,6 +12,7 @@ const {ddgSearch} = require('./dist/src/search/v2/ddgsearch');
 const {searxng_search} = require('./dist/src/search/v2/searxng');
 const {matchesDomains} = require('./dist/src/search/operators');
 const {config} = require('./dist/src/config');
+const axios = require('axios');
 const deadline = require('./search-deadline.cjs');
 // The core reaches this worker as its SearXNG endpoint. The worker must reach
 // the real SearXNG container, never itself.
@@ -83,6 +84,54 @@ async function orderedSearch(input,requestId) {
 // 1 keeps DDG first (one DDG page, 10 rows). Rows are de-duplicated by URL
 // within a page. Every request runs under the shared 12s deadline.
 const COMPAT_PAGE_RESULTS=20,COMPAT_DDG_RESULTS=10,COMPAT_MAX_PAGE=5,COMPAT_SEARXNG_PAGES=3;
+// Hints the core's SearXNG request cannot carry. The search continuity proxy
+// appends them to the query as "fcctl:tbs=..." and "fcctl:country=..."; they
+// are removed here before any engine sees the query. Unknown values are ignored.
+// country sets DDG's region only: a SearXNG region switches Yahoo to a regional
+// host that search-egress does not allow, which suspends the engine.
+const HINT=/(^|\s)fcctl:(tbs|country)=(\S{1,96})(?=\s|$)/g;
+const DAY_MS=86400000;
+function hintDate(match) {
+  if(!match) return null;
+  const [,month,day,year]=match.map(Number);
+  const date=new Date(Date.UTC(year,month-1,day));
+  return date.getUTCFullYear()===year && date.getUTCMonth()===month-1 && date.getUTCDate()===day ? date : null;
+}
+function timeHint(tbs) {
+  const parts=String(tbs||'').split(',');
+  const qdr=parts.map(part=>/^qdr:([hdwmy])$/.exec(part)).find(Boolean);
+  if(qdr) {
+    // DDG and SearXNG have no hour filter: an hour widens to a day.
+    const unit=qdr[1]==='h'?'d':qdr[1];
+    return {ddg:unit,timeRange:{d:'day',w:'week',m:'month',y:'year'}[unit]};
+  }
+  if(!parts.includes('cdr:1')) return {};
+  const pick=name=>hintDate(parts.map(part=>new RegExp('^'+name+':(\\d{1,2})/(\\d{1,2})/(\\d{4})$').exec(part)).find(Boolean));
+  const now=new Date(),min=pick('cd_min'),max=pick('cd_max')||now;
+  if(!min || max<min) return {};
+  const iso=date=>date.toISOString().slice(0,10);
+  // SearXNG only knows ranges ending now: use the smallest one reaching cd_min.
+  const age=(now-min)/DAY_MS;
+  const timeRange=age<=1?'day':age<=7?'week':age<=31?'month':age<=366?'year':undefined;
+  return {ddg:iso(min)+'..'+iso(max),timeRange};
+}
+function takeHints(raw,lang) {
+  const found={};
+  const query=raw.replace(HINT,(match,lead,name,value)=>{found[name]=value;return lead;}).replace(/\s+/g,' ').trim();
+  const country=/^[A-Za-z]{2}$/.test(found.country||'') ? found.country.toLowerCase() : undefined;
+  const time=timeHint(found.tbs);
+  return {query,country,tbs:time.ddg,timeRange:time.timeRange};
+}
+async function searxngPage(input,page) {
+  // Same target string as searxng-timeout.cjs, so its deadline and logging apply.
+  const target=config.SEARXNG_ENDPOINT.replace(/\/$/,'')+'/search';
+  const response=await axios.get(target,{headers:{'Content-Type':'application/json'},params:{
+    q:input.query,language:input.lang,engines:config.SEARXNG_ENGINES??'',
+    categories:config.SEARXNG_CATEGORIES??'',pageno:page,format:'json',
+    ...(input.safe?{safesearch:2}:{}),...(input.timeRange?{time_range:input.timeRange}:{})}});
+  return (Array.isArray(response.data?.results)?response.data.results:[])
+    .map(row=>({url:row.url,title:row.title,description:row.content}));
+}
 function compatInput(url) {
   const params=url.searchParams;
   const query=params.get('q');
@@ -92,7 +141,9 @@ function compatInput(url) {
     || !Number.isInteger(pageno) || pageno<1 || pageno>COMPAT_MAX_PAGE || !/^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})?$/.test(lang)) {
     throw new Error('invalid_search_input');
   }
-  return {query,pageno,lang,safe:params.get('safesearch')==='2'};
+  const hints=takeHints(query,lang);
+  if(!hints.query) throw new Error('invalid_search_input');
+  return {...hints,pageno,lang,safe:params.get('safesearch')==='2'};
 }
 async function compatPage(input,pageno,requestId) {
   const rows=[],seen=new Set();
@@ -110,9 +161,7 @@ async function compatPage(input,pageno,requestId) {
     if(rows.length>=COMPAT_PAGE_RESULTS) break;
     providerEvent(requestId,'searxng','start',{pageno,page});
     try {
-      const result=await searxng_search(input.query,{num_results:COMPAT_PAGE_RESULTS,lang:input.lang,
-        country:input.country,safe:input.safe,page});
-      const web=Array.isArray(result?.web)?result.web:[];
+      const web=await searxngPage(input,page);
       add(web);
       if(!web.length) break;
     } catch(error) {
@@ -124,18 +173,20 @@ async function compatPage(input,pageno,requestId) {
   return rows;
 }
 async function compatSearch(url,req,res) {
-  const {query,pageno,lang,safe}=compatInput(url);
+  const {query,pageno,lang,safe,country,tbs,timeRange}=compatInput(url);
   const requestId=randomUUID().replaceAll('-','');
   const controller=new AbortController();
   const cancel=()=>{if(!res.writableFinished) controller.abort();};
   res.once('close',cancel);
-  const input={query,num_results:COMPAT_DDG_RESULTS,lang,country:'us',safe,signal:controller.signal};
+  const input={query,num_results:COMPAT_DDG_RESULTS,lang,country:country??'us',tbs,timeRange,safe,
+    signal:controller.signal};
   const started=Date.now();
   try {
     const found=await deadline.runSearch(value=>compatPage(value,pageno,requestId),input);
     const rows=found.map(row=>({url:row.url,title:String(row.title??''),content:String(row.description??'')}));
-    console.log(JSON.stringify({event:'search_compat',requestId,pageno,count:rows.length,elapsedMs:Date.now()-started}));
-    return rows;
+    console.log(JSON.stringify({event:'search_compat',requestId,pageno,count:rows.length,
+      hints:{country:country??null,tbs:tbs??null,timeRange:timeRange??null},elapsedMs:Date.now()-started}));
+    return {query,rows};
   } finally {res.removeListener('close',cancel);}
 }
 function sendJson(res,status,value) {
@@ -146,8 +197,8 @@ const server = http.createServer(async (req,res) => {
   if (req.method === 'GET' && /^\/search(?:\?|$)/.test(req.url||'')) {
     try {
       const url=new URL(req.url,'http://search-worker');
-      const results=await compatSearch(url,req,res);
-      sendJson(res,200,{query:url.searchParams.get('q'),number_of_results:results.length,results});
+      const {query,rows}=await compatSearch(url,req,res);
+      sendJson(res,200,{query,number_of_results:rows.length,results:rows});
     } catch(error) {
       const code=['invalid_search_input','search_deadline','search_cancelled'].includes(error?.message)
         ? error.message : 'search_upstream_unavailable';

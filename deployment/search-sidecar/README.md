@@ -36,7 +36,17 @@ instead of replacing it with the candidate core image.
   uses SearXNG pages 3p-2..3p (about 7 rows each) and stops at 20 rows; page 1
   starts with one DDG page (10 rows). A short page means the engines had no
   more rows.
-- The core's SearXNG request carries no `tbs` (time filter) or `country`.
+- The core's SearXNG request carries no `tbs` or `country`. While this
+  profile is active, the continuity proxy appends them to the query as
+  `fcctl:tbs=...` and `fcctl:country=...` (it detects the profile from the
+  live Compose override); the worker removes the tokens before searching.
+  `tbs` (`qdr:h/d/w/m/y`, or `cdr:1,cd_min:M/D/YYYY,cd_max:M/D/YYYY`) becomes
+  DDG's `df` (an hour widens to a day; custom ranges are exact) and SearXNG's
+  `time_range` (custom ranges use the smallest range reaching `cd_min`).
+  Yahoo, the working SearXNG engine, has no year filter. `country` sets DDG's
+  region only: a SearXNG region moves Yahoo to a regional host that
+  search-egress does not allow. Exa fallback still skips `tbs`/`country`
+  requests.
 - A client disconnect no longer cancels the worker; the worker still stops at
   its 12 s deadline.
 
