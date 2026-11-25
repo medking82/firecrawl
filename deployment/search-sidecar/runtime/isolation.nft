@@ -1,0 +1,30 @@
+add table inet firecrawl_search
+flush table inet firecrawl_search
+table inet firecrawl_search {
+ chain input {
+  type filter hook input priority -20; policy accept;
+  iifname { "br-fc-search", "br-fc-egress" } ct state established,related accept
+  iifname { "br-fc-search", "br-fc-egress" } counter reject
+ }
+ chain forward {
+  type filter hook forward priority -20; policy accept;
+  iifname "br-fc-egress" ct state established,related accept
+  iifname "br-fc-egress" ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24, 192.0.2.0/24, 192.88.99.0/24, 192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/4, 240.0.0.0/4 } counter reject
+  iifname "br-fc-egress" meta nfproto ipv6 counter reject
+  iifname "br-fc-egress" tcp dport 443 accept
+  iifname "br-fc-egress" counter reject
+ }
+}
+add table bridge firecrawl_search
+flush table bridge firecrawl_search
+table bridge firecrawl_search {
+ chain forward {
+  type filter hook forward priority -10; policy accept;
+  meta ibrname "br-fc-search" ether type arp accept
+  meta ibrname "br-fc-search" ct state established,related accept
+  meta ibrname "br-fc-search" ip saddr 172.30.247.10 ip daddr 172.30.247.20 tcp dport 8081 accept
+  meta ibrname "br-fc-search" ip saddr { 172.30.247.10, 172.30.247.20 } ip daddr 172.30.247.30 tcp dport 8080 accept
+  meta ibrname "br-fc-search" ip saddr { 172.30.247.20, 172.30.247.30 } ip daddr 172.30.247.40 tcp dport 3128 accept
+  meta ibrname "br-fc-search" counter drop
+ }
+}
