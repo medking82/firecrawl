@@ -216,7 +216,7 @@ smoke_test() {
   local ready=0
   for _ in $(seq 1 30); do
     if curl --fail --silent --show-error --max-time 5 \
-      http://127.0.0.1:3002/v0/health/readiness >/dev/null; then
+      http://127.0.0.1:3002/health/readiness >/dev/null; then
       ready=1
       break
     fi

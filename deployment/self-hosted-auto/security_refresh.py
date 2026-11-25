@@ -3,6 +3,7 @@ import argparse
 import datetime as dt
 import fcntl
 import hashlib
+import http.client
 import importlib.util
 import json
 import os
@@ -62,6 +63,22 @@ def normalize_api_configuration(value):
     return value
 
 
+def readiness(port):
+    """Core v2.11.869+ serves only /health/readiness; Browser and Monitor still serve v0 only."""
+    for path in ('/health/readiness', '/v0/health/readiness'):
+        conn = http.client.HTTPConnection('127.0.0.1', port, timeout=2)
+        try:
+            conn.request('GET', path)
+            response = conn.getresponse(); body = response.read()
+            if response.status == 200 and json.loads(body).get('status') == 'ok':
+                return True
+        except (OSError, ValueError, http.client.HTTPException):
+            pass
+        finally:
+            conn.close()
+    return False
+
+
 def helper():
     if HELPER.is_symlink() or hashlib.sha256(HELPER.read_bytes()).hexdigest() != HELPER_SHA:
         raise RuntimeError('deployment helper changed')
@@ -69,6 +86,7 @@ def helper():
     p = importlib.util.module_from_spec(spec); spec.loader.exec_module(p)
     raw = p.api_configuration
     p.api_configuration = lambda row: normalize_api_configuration(raw(row))
+    p.readiness = readiness
     return p
 
 
