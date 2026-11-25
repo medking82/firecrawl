@@ -17,7 +17,24 @@ import time
 import urllib.parse
 from pathlib import Path
 
+import importlib.util
+
 import search_continuity as policy
+
+
+def _load_transport():
+    """Root/owner-installed sibling in a release; the shared repo copy in tests."""
+    here = Path(__file__).resolve().parent
+    for path in (here / 'search_transport.py', here.parent.parent / 'hermes-johorindustry' / 'search_transport.py'):
+        if path.is_file() and not path.is_symlink():
+            spec = importlib.util.spec_from_file_location('strata_search_transport', path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+    raise ImportError('Search transport sibling unavailable')
+
+
+transport = _load_transport()
 
 BACKEND = ('127.0.0.1', 3002)
 HOP = {'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
@@ -98,6 +115,44 @@ def backend_timeout(body=None):
     return max(values)
 
 
+def search_seconds(body):
+    """One absolute ceiling per search request.
+
+    Plain web search (the only fallback-compatible shape) is capped at the
+    shared transport total and may be shortened by the client timeout.
+    scrapeOptions searches keep their scrape budget: no fallback exists for
+    them, but the budget is still absolute and cancelled on disconnect.
+    """
+    if isinstance(body, dict) and body.get('scrapeOptions'):
+        return backend_timeout(body), False
+    seconds = transport.TOTAL_SECONDS
+    value = body.get('timeout') if isinstance(body, dict) else None
+    if type(value) in (int, float) and value > 0:
+        seconds = min(seconds, max(value / 1000.0, 1.0))
+    return seconds, True
+
+
+def read_bounded(response, budget, maximum, code, status):
+    """Read with the budget checked between parts; a watchdog-closed socket is a timeout."""
+    chunks, size = [], 0
+    try:
+        while True:
+            budget.remaining()
+            part = response.read1(min(65536, maximum + 1 - size))
+            budget.remaining()
+            if not part:
+                return b''.join(chunks)
+            size += len(part)
+            if size > maximum:
+                raise policy.SearchFailure(code, status)
+            chunks.append(part)
+    except policy.SearchFailure:
+        raise
+    except (OSError, ValueError, http.client.HTTPException):
+        budget.remaining()
+        raise
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
 
@@ -175,37 +230,84 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def forward_headers(self):
         # Host passes through (already checked to be loopback): Firecrawl builds job
         # status URLs from it, and clients reach this proxy on another port (13002).
-        skip = HOP | {'content-length', 'accept-encoding'}
+        skip = HOP | {'content-length', 'accept-encoding', transport.HEADER.lower()}
         skip |= {x.strip().lower() for x in self.headers.get('Connection', '').split(',')}
         return {k: v for k, v in self.headers.items() if k.lower() not in skip}
 
     def primary(self, body):
-        connection = http.client.HTTPConnection(*self.server.backend, timeout=backend_timeout(body))
+        parent = getattr(self, 'search_budget', None)
+        stage = transport.Budget(getattr(self, 'primary_seconds', transport.PRIMARY_SECONDS), parent=parent) \
+            if parent is not None else transport.Budget(backend_timeout(body))
+        connection = None
         try:
+            connection = transport.LoopbackConnection(self.server.backend[1], stage)
             raw = json.dumps(body).encode()
             headers = self.forward_headers()
             headers['Content-Type'] = 'application/json'
             connection.request('POST', getattr(self, 'search_path', '/v2/search'), body=raw, headers=headers)
             response = connection.getresponse()
             if 400 <= response.status < 500 and response.status not in (408, 429):
-                raw_error = response.read(MAX_JSON + 1)
-                if len(raw_error) > MAX_JSON:
-                    raise policy.SearchFailure('backend_error_response_too_large', 502)
+                raw_error = read_bounded(response, stage, MAX_JSON, 'backend_error_response_too_large', 502)
                 raise BackendReply(response.status, response.getheaders(), raw_error)
             if response.status != 200:
                 raise policy.SearchFailure('primary_rate_limited' if response.status == 429 else 'primary_http_error',
                                            429 if response.status == 429 else 503)
-            raw = response.read(MAX_JSON + 1)
-            if len(raw) > MAX_JSON:
-                raise policy.SearchFailure('primary_response_too_large')
+            raw = read_bounded(response, stage, MAX_JSON, 'primary_response_too_large', 503)
             result = json.loads(raw)
             if getattr(self, 'search_path', '/v2/search') == '/v1/search' and isinstance(result, dict) and isinstance(result.get('data'), list):
                 result['data'] = {'web': result['data']}
             return result
+        except TimeoutError:
+            # Stage expiry still leaves the entry budget for fallback; entry
+            # expiry/disconnect makes the fallback fail fast as well.
+            if parent is not None and parent.cancelled.is_set():
+                raise policy.SearchFailure(parent.reason or 'search_deadline', 504) from None
+            raise policy.SearchFailure('primary_timeout', 504) from None
         except (http.client.HTTPException, OSError):
             raise policy.SearchFailure('primary_unavailable') from None
         finally:
-            connection.close()
+            if connection is not None:
+                connection.close()
+            stage.close()
+
+    def search_fallback(self, budget):
+        configured = self.server.fallback
+        if configured is policy.exa_search:
+            # Same fixed Exa endpoint, now DNS-validated, TLS-verified and bound to the entry budget.
+            return lambda query, limit: transport.exa_search(query, limit, policy, budget,
+                                                             user_agent='strata-public-web/1.0')
+        def injected(query, limit):
+            try:
+                budget.remaining()
+                rows = configured(query, limit)
+                budget.remaining()
+                return rows
+            except TimeoutError:
+                raise policy.SearchFailure(budget.reason or 'search_deadline', 504) from None
+        return injected
+
+    def budgeted_search(self, body):
+        seconds, plain = search_seconds(body)
+        deadline = transport.deadline_header(self.headers.get(transport.HEADER), time.monotonic() + seconds)
+        with transport.Budget(seconds, deadline=deadline, client=self.connection) as budget:
+            self.search_budget = budget
+            self.primary_seconds = transport.PRIMARY_SECONDS if plain else seconds
+            fallback = self.search_fallback(budget)
+            def operation():
+                try:
+                    budget.remaining()  # admission wait counts against the same ceiling
+                    return policy.search(body, self.primary, fallback=fallback, gate=self.server.fallback_gate,
+                                         domain_filters=getattr(self, 'search_path', '/v2/search') != '/v1/search')
+                except TimeoutError:
+                    raise policy.SearchFailure(budget.reason or 'search_deadline', 504) from None
+            try:
+                with policy.controls.request_budget(budget):
+                    return policy.controls.CONTROL.run(
+                        body, operation, fresh='no-cache' in self.headers.get('Cache-Control', '').lower())
+            except TimeoutError:
+                raise policy.SearchFailure(budget.reason or 'search_deadline', 504) from None
+            finally:
+                self.search_budget = None
 
     def remember_scrape(self, raw, body):
         if len(raw) > MAX_JSON:
@@ -286,10 +388,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 policy.reject_baidu_targets(body)
                 if self.command == 'POST' and path in ('/v1/search', '/v2/search'):
                     self.search_path = path
-                    result = policy.controls.CONTROL.run(body,
-                        lambda: policy.search(body, self.primary, fallback=self.server.fallback,
-                                              gate=self.server.fallback_gate),
-                        fresh='no-cache' in self.headers.get('Cache-Control', '').lower())
+                    result = self.budgeted_search(body)
                     if path == '/v1/search':
                         result['data'] = result['data'].get('web', [])
                     self.reply(200, result)
