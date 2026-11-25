@@ -36,8 +36,9 @@ class Stalling(http.server.BaseHTTPRequestHandler):
         if mode in ('v1-removed', 'v1-error'):
             self.server.requests.append((self.path, body))
         if self.path == '/v1/search' and mode in ('v1-removed', 'v1-error'):
-            raw = (b'<pre>Cannot POST /v1/search</pre>' if mode == 'v1-removed'
-                   else b'{"success":false,"error":"search not found"}')
+            error = ('POST /v1/search is not a Firecrawl API endpoint.' if mode == 'v1-removed'
+                     else 'search not found')
+            raw = json.dumps({'success': False, 'code': 'NOT_FOUND', 'error': error}).encode()
             self.send_response(404)
             self.send_header('Content-Length', str(len(raw)))
             self.end_headers()

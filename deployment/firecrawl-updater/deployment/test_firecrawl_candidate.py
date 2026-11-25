@@ -106,7 +106,16 @@ else: raise SystemExit('unexpected Docker action')
         calls=[json.loads(line) for line in self.fixture.with_suffix('.calls').read_text().splitlines()]
         probe=next(row for row in calls if row[:2]==['run','-d'])
         self.assertIn('none',probe); self.assertIn('--read-only',probe)
+        self.assertIn('USE_DB_AUTHENTICATION=false', probe)
         self.assertFalse(any('up' in row or 'build' in row for row in calls))
+
+    def test_candidate_probe_preserves_absent_database_auth_setting(self):
+        del self.config['services']['api']['environment']['USE_DB_AUTHENTICATION']
+        result = self.candidate()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = [json.loads(line) for line in self.fixture.with_suffix('.calls').read_text().splitlines()]
+        probe = next(row for row in calls if row[:2] == ['run', '-d'])
+        self.assertFalse(any(arg.startswith('USE_DB_AUTHENTICATION=') for arg in probe))
 
     def test_changed_protected_image_rejects_cutover(self):
         self.assertEqual(self.candidate().returncode, 0)
