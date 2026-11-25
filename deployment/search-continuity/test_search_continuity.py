@@ -61,6 +61,30 @@ class PolicyTests(unittest.TestCase):
                                  includeDomains=['example.org', 'baike.baidu.com.hk'])
         self.assertEqual([r['url'] for r in result['data']['web']], [GOOD['url']])
 
+    def test_search_hints_ride_in_the_core_query_only(self):
+        ok = {'success': True, 'data': {'web': [GOOD]}}
+        primary = Mock(return_value=ok)
+        self.run_search(primary, tbs='qdr:w', country='MY')
+        self.assertEqual(primary.call_args.args[0]['query'], 'public subject')
+        primary = Mock(return_value=ok)
+        policy.search({'query': 'a fcctl:tbs=x b', 'limit': 3, 'tbs': 'qdr:w', 'country': 'MY'}, primary,
+                      Mock(), policy.FallbackGate(), hints=True)
+        sent = primary.call_args.args[0]
+        self.assertEqual(sent['query'], 'a b fcctl:tbs=qdr:w fcctl:country=my')
+        self.assertEqual((sent['tbs'], sent['country']), ('qdr:w', 'MY'))
+        primary = Mock(return_value=ok)
+        policy.search({'query': 'q', 'limit': 3, 'tbs': 'qdr:d x', 'country': 'MYS'}, primary,
+                      Mock(), policy.FallbackGate(), hints=True)
+        self.assertEqual(primary.call_args.args[0]['query'], 'q')
+        with self.assertRaises(policy.SearchFailure):
+            policy.search({'query': 'fcctl:tbs=qdr:d', 'limit': 3}, Mock(), Mock(), policy.FallbackGate(), hints=True)
+
+    def test_fallback_keeps_the_client_query(self):
+        fallback = Mock(return_value=[GOOD])
+        policy.search({'query': 'public subject', 'limit': 3}, Mock(side_effect=OSError()), fallback,
+                      policy.FallbackGate(), hints=True)
+        self.assertEqual(fallback.call_args.args[0], 'public subject')
+
     def test_error_falls_back_once(self):
         for primary in (Mock(side_effect=OSError()), Mock(return_value={'success': False})):
             fallback = Mock(return_value=[GOOD])
