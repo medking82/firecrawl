@@ -1,0 +1,147 @@
+services:
+  api:
+    restart: unless-stopped
+    environment:
+      SEARXNG_ENDPOINT: http://searxng:8080
+      SEARXNG_ENGINES: brave,yahoo
+      SEARXNG_CATEGORIES: general
+      NODE_OPTIONS: --require=/app/searxng-timeout.cjs
+      SEARCH_WORKER_URL: http://search-worker:8081/v2/search
+      SEARCH_TRACE: '1'
+    volumes:
+    - /opt/firecrawl-search/searxng-timeout.cjs:/app/searxng-timeout.cjs:ro
+    - /opt/firecrawl-search/search-deadline.cjs:/app/search-deadline.cjs:ro
+    networks:
+      backend: null
+      search:
+        ipv4_address: 172.30.247.10
+  nuq-postgres:
+    restart: unless-stopped
+  playwright-service:
+    restart: unless-stopped
+  redis:
+    restart: unless-stopped
+  rabbitmq:
+    restart: unless-stopped
+  foundationdb:
+    restart: unless-stopped
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    pull_policy: always
+    restart: unless-stopped
+    env_file:
+    - /home/marck/.local/state/firecrawl-updater/search-searxng.env
+    volumes:
+    - /opt/firecrawl-search/settings.yml:/etc/searxng/settings.yml:ro
+    networks:
+      search:
+        ipv4_address: 172.30.247.30
+    expose:
+    - '8080'
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    mem_limit: 512m
+    cpus: 1.0
+    healthcheck:
+      test:
+      - CMD
+      - wget
+      - -q
+      - -O
+      - /dev/null
+      - http://127.0.0.1:8080/healthz
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    dns:
+    - 127.0.0.1
+  search-worker:
+    restart: unless-stopped
+    cap_drop: &id001
+    - ALL
+    security_opt: &id002
+    - no-new-privileges:true
+    read_only: true
+    tmpfs: &id003
+    - /tmp:rw,noexec,nosuid,size=32m
+    cpus: 1.0
+    image: sha256:537d0249252ff10e60b3b60367f9b330d7a74a2c0d66d51ab20583f650d2a6f5
+    pull_policy: never
+    entrypoint:
+    - node
+    command:
+    - --require
+    - /app/searxng-timeout.cjs
+    - /app/search-worker.cjs
+    working_dir: /app
+    user: 1000:1000
+    mem_limit: 512m
+    expose:
+    - '8081'
+    dns:
+    - 127.0.0.1
+    networks:
+      search:
+        ipv4_address: 172.30.247.20
+    environment:
+      SEARCH_WORKER_ROLE: '1'
+      SEARCH_TRACE: '1'
+      SEARXNG_ENDPOINT: http://searxng:8080
+      SEARXNG_ENGINES: brave,yahoo
+      SEARXNG_CATEGORIES: general
+      USE_DB_AUTHENTICATION: 'false'
+    volumes:
+    - /opt/firecrawl-search/searxng-timeout.cjs:/app/searxng-timeout.cjs:ro
+    - /opt/firecrawl-search/search-deadline.cjs:/app/search-deadline.cjs:ro
+    - /opt/firecrawl-search/search-worker.cjs:/app/search-worker.cjs:ro
+  search-egress:
+    restart: unless-stopped
+    cap_drop: *id001
+    security_opt: *id002
+    read_only: true
+    tmpfs: *id003
+    cpus: 1.0
+    image: sha256:eb8b09ffa83aebbe8b8d3ded23cfd224b2d3b01db4f3af9eb03876ef6def6dda
+    pull_policy: never
+    entrypoint:
+    - python3
+    - -I
+    - -B
+    - /app/search_egress.py
+    command: []
+    working_dir: /app
+    user: 65534:65534
+    mem_limit: 128m
+    expose:
+    - '3128'
+    networks:
+      search:
+        ipv4_address: 172.30.247.40
+      search_egress:
+        ipv4_address: 172.30.248.2
+        gw_priority: 1
+    volumes:
+    - /opt/firecrawl-search/search_egress.py:/app/search_egress.py:ro
+networks:
+  search:
+    name: firecrawl_search
+    driver: bridge
+    internal: true
+    enable_ipv6: false
+    driver_opts:
+      com.docker.network.bridge.name: br-fc-search
+    ipam:
+      config:
+      - subnet: 172.30.247.0/24
+  search_egress:
+    name: firecrawl_search_egress
+    driver: bridge
+    internal: false
+    enable_ipv6: false
+    driver_opts:
+      com.docker.network.bridge.name: br-fc-egress
+    ipam:
+      config:
+      - subnet: 172.30.248.0/24

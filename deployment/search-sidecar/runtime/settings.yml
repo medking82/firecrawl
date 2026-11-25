@@ -1,0 +1,24 @@
+use_default_settings:
+  engines:
+    keep_only:
+    - brave
+    - yahoo
+server:
+  limiter: false
+  public_instance: false
+  image_proxy: false
+search:
+  formats:
+  - html
+  - json
+outgoing:
+  request_timeout: 3.0
+  max_request_timeout: 3.0
+  proxies:
+    all://:
+    - http://search-egress:3128
+engines:
+- name: brave
+  disabled: false
+- name: yahoo
+  disabled: false
