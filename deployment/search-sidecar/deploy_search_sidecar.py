@@ -6,6 +6,8 @@ run/update locks, so the core updater and security refresh cannot interleave.
 apply:    preload -> sidecar. Backs up the exact override, worker file and live
           image IDs, recreates only api and search-worker, then verifies the
           core loads no search code. Any failure restores the backup.
+          From an earlier sidecar worker release it replaces only the worker
+          file and recreates only search-worker.
 rollback: restores a backup made by apply (default: the newest one).
 status:   prints the active profile and the live search runtime facts.
 """
@@ -30,6 +32,10 @@ SERVICES = ('search-worker', 'api')
 CONTAINERS = {'api': 'firecrawl-api-1', 'search-worker': 'firecrawl-search-worker-1'}
 PRELOAD_WORKER = '346ae3e267ecaa43cf5bbcfd6b3df12a33ba7d21f603edcaba42128526d33b53'
 DDG_BLOCK = 'html.duckduckgo.com:127.0.0.1'
+# Reviewed earlier sidecar worker releases that apply may upgrade and rollback may restore.
+PREVIOUS_SIDECAR_WORKERS = {
+    '5d8b40a5cc067fed631015b78224cdf7068c6c261ee0482826c02f0086b101f1': 'sidecar-01286ab',
+}
 
 
 def sha(path):
@@ -45,10 +51,17 @@ def inspect(name):
 
 
 def expected():
-    return {'sidecar': {'override': sha(HERE / 'docker-compose.override.sidecar.yaml'),
-                        'worker': sha(HERE / 'runtime/search-worker.cjs')},
-            'preload': {'override': sha(HERE / 'docker-compose.override.preload.yaml'),
-                        'worker': PRELOAD_WORKER}}
+    sidecar = sha(HERE / 'docker-compose.override.sidecar.yaml')
+    known = {'sidecar': {'override': sidecar, 'worker': sha(HERE / 'runtime/search-worker.cjs')},
+             'preload': {'override': sha(HERE / 'docker-compose.override.preload.yaml'),
+                         'worker': PRELOAD_WORKER}}
+    for worker, name in PREVIOUS_SIDECAR_WORKERS.items():
+        known[name] = {'override': sidecar, 'worker': worker}
+    return known
+
+
+def sidecar_like(name):
+    return name == 'sidecar' or name in PREVIOUS_SIDECAR_WORKERS.values()
 
 
 def profile():
@@ -98,11 +111,11 @@ def compose_files():
     return files
 
 
-def recreate(files):
+def recreate(files, services=SERVICES):
     args = ['sudo', '-u', 'marck', 'docker', 'compose', '--project-directory', REPO]
     for item in files:
         args += ['-f', item]
-    run(*args, 'up', '-d', '--no-deps', '--no-build', '--pull', 'never', '--force-recreate', *SERVICES, timeout=600)
+    run(*args, 'up', '-d', '--no-deps', '--no-build', '--pull', 'never', '--force-recreate', *services, timeout=600)
 
 
 def wait_ready(deadline=180):
@@ -137,7 +150,7 @@ def live(images=None):
 def verify(name, images):
     facts = live(images)
     ok = facts['running'] and (
-        (name == 'sidecar' and facts['api_ddg_blocked'] and not facts['api_search_mounts']
+        (sidecar_like(name) and facts['api_ddg_blocked'] and not facts['api_search_mounts']
          and facts['api_search_env'].get('SEARXNG_ENDPOINT') == 'http://search-worker:8081'
          and 'NODE_OPTIONS' not in facts['api_search_env'])
         or (name == 'preload' and not facts['api_ddg_blocked']
@@ -147,10 +160,10 @@ def verify(name, images):
     return facts
 
 
-def switch(override, worker, name, images, files):
+def switch(override, worker, name, images, files, services=SERVICES):
     place(override, OVERRIDE)
     place(worker, WORKER)
-    recreate(files)
+    recreate(files, services)
     wait_ready()
     if profile() != name:
         raise SystemExit('host files do not match ' + name)
@@ -172,11 +185,14 @@ def apply():
         (backup / 'live.json').write_text(json.dumps({'images': images, 'compose_files': files, 'profile': current}))
         for path in (BACKUPS, backup, *backup.iterdir()):
             os.chown(path, 1000, 1000)
+        # The override is the same for every sidecar release: only the worker restarts.
+        services = ('search-worker',) if sidecar_like(current) else SERVICES
         try:
             facts = switch(HERE / 'docker-compose.override.sidecar.yaml', HERE / 'runtime/search-worker.cjs',
-                           'sidecar', images, files)
+                           'sidecar', images, files, services)
         except BaseException as error:
-            switch(backup / 'docker-compose.override.yaml', backup / 'search-worker.cjs', 'preload', images, files)
+            switch(backup / 'docker-compose.override.yaml', backup / 'search-worker.cjs', current, images, files,
+                   services)
             raise SystemExit('sidecar apply failed and was rolled back: ' + str(error)) from None
         print(json.dumps({'status': 'sidecar', 'backup': str(backup), 'live': facts}))
 
@@ -185,13 +201,16 @@ def rollback(path):
     with maintenance():
         backup = path or max(p for p in BACKUPS.iterdir() if p.is_dir())
         record = json.loads((backup / 'live.json').read_text())
-        if sha(backup / 'search-worker.cjs') != PRELOAD_WORKER or record.get('profile') != 'preload':
-            raise SystemExit('backup is not a reviewed preload state')
+        target = record.get('profile')
+        state = {'override': sha(backup / 'docker-compose.override.yaml'), 'worker': sha(backup / 'search-worker.cjs')}
+        if target == 'sidecar' or expected().get(target) != state:
+            raise SystemExit('backup is not a reviewed earlier search state')
         if profile() != 'sidecar':
-            raise SystemExit('host is not on the sidecar profile')
-        facts = switch(backup / 'docker-compose.override.yaml', backup / 'search-worker.cjs', 'preload',
-                       record['images'], compose_files())
-        print(json.dumps({'status': 'preload', 'backup': str(backup), 'live': facts}))
+            raise SystemExit('host is not on the current sidecar release')
+        services = ('search-worker',) if sidecar_like(target) else SERVICES
+        facts = switch(backup / 'docker-compose.override.yaml', backup / 'search-worker.cjs', target,
+                       record['images'], compose_files(), services)
+        print(json.dumps({'status': target, 'backup': str(backup), 'live': facts}))
 
 
 def main():
