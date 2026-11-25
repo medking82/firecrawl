@@ -66,7 +66,7 @@ async function orderedSearch(input,requestId) {
   if(config.SEARXNG_ENDPOINT) {
     providerEvent(requestId,'searxng','start');
     try {
-      const web=inDomains(await searxng_search(input.query,{num_results:input.searxng_results??input.num_results??5,tbs:input.tbs,
+      const web=inDomains(await searxng_search(input.query,{num_results:input.num_results??5,tbs:input.tbs,
         filter:input.filter,lang:input.lang??'en',country:input.country??'us',location:input.location,safe:input.safe}));
       if(web.length) return {web};
     } catch {
@@ -76,11 +76,13 @@ async function orderedSearch(input,requestId) {
   return {};
 }
 // SearXNG-compatible GET /search for the core's built-in SearXNG provider. The
-// core sends no result count. Page 1 asks DDG for Firecrawl's default 5 rows so
-// one DDG page suffices (a second page plus its 1s pause can exceed the DDG
-// budget and pause DDG); SearXNG fallback and later pages return up to 10 rows.
-// Every request runs under the shared 12s deadline.
-const COMPAT_DDG_RESULTS=5,COMPAT_PAGE_RESULTS=10,COMPAT_MAX_PAGE=5;
+// core sends no result count: it assumes 20 rows per page, asks page 1 for
+// limit <= 20 and later pages only for larger limits, then trims to limit. So
+// every page here returns up to 20 rows. SearXNG pages carry about 7 rows, so
+// page p maps to SearXNG pages 3p-2..3p and stops once 20 rows are found. Page
+// 1 keeps DDG first (one DDG page, 10 rows). Rows are de-duplicated by URL
+// within a page. Every request runs under the shared 12s deadline.
+const COMPAT_PAGE_RESULTS=20,COMPAT_DDG_RESULTS=10,COMPAT_MAX_PAGE=5,COMPAT_SEARXNG_PAGES=3;
 function compatInput(url) {
   const params=url.searchParams;
   const query=params.get('q');
@@ -92,25 +94,46 @@ function compatInput(url) {
   }
   return {query,pageno,lang,safe:params.get('safesearch')==='2'};
 }
+async function compatPage(input,pageno,requestId) {
+  const rows=[],seen=new Set();
+  const add=list=>{
+    for(const row of Array.isArray(list)?list:[]) {
+      if(rows.length>=COMPAT_PAGE_RESULTS) return;
+      if(!row || typeof row.url!=='string' || seen.has(row.url)) continue;
+      seen.add(row.url);rows.push(row);
+    }
+  };
+  if(pageno===1) add(await tryDdg(input,requestId,result=>Array.isArray(result?.web)?result.web:[]));
+  if(!config.SEARXNG_ENDPOINT) return rows;
+  const first=(pageno-1)*COMPAT_SEARXNG_PAGES+1;
+  for(let page=first;page<first+COMPAT_SEARXNG_PAGES;page++) {
+    if(rows.length>=COMPAT_PAGE_RESULTS) break;
+    providerEvent(requestId,'searxng','start',{pageno,page});
+    try {
+      const result=await searxng_search(input.query,{num_results:COMPAT_PAGE_RESULTS,lang:input.lang,
+        country:input.country,safe:input.safe,page});
+      const web=Array.isArray(result?.web)?result.web:[];
+      add(web);
+      if(!web.length) break;
+    } catch(error) {
+      if(['search_deadline','search_cancelled'].includes(error?.message) && !rows.length) throw error;
+      providerEvent(requestId,'searxng','error',{page});
+      break;
+    }
+  }
+  return rows;
+}
 async function compatSearch(url,req,res) {
   const {query,pageno,lang,safe}=compatInput(url);
   const requestId=randomUUID().replaceAll('-','');
   const controller=new AbortController();
   const cancel=()=>{if(!res.writableFinished) controller.abort();};
   res.once('close',cancel);
-  const input={query,num_results:COMPAT_DDG_RESULTS,searxng_results:COMPAT_PAGE_RESULTS,lang,country:'us',safe,
-    signal:controller.signal};
+  const input={query,num_results:COMPAT_DDG_RESULTS,lang,country:'us',safe,signal:controller.signal};
   const started=Date.now();
   try {
-    const data=await deadline.runSearch(async value=>{
-      if(pageno===1) return orderedSearch(value,requestId);
-      providerEvent(requestId,'searxng','start',{pageno});
-      const result=await searxng_search(value.query,{num_results:COMPAT_PAGE_RESULTS,lang:value.lang,
-        country:value.country,safe:value.safe,page:pageno});
-      return {web:Array.isArray(result?.web)?result.web:[]};
-    },input);
-    const rows=(Array.isArray(data?.web)?data.web:[]).filter(row=>row && typeof row.url==='string')
-      .map(row=>({url:row.url,title:String(row.title??''),content:String(row.description??'')}));
+    const found=await deadline.runSearch(value=>compatPage(value,pageno,requestId),input);
+    const rows=found.map(row=>({url:row.url,title:String(row.title??''),content:String(row.description??'')}));
     console.log(JSON.stringify({event:'search_compat',requestId,pageno,count:rows.length,elapsedMs:Date.now()-started}));
     return rows;
   } finally {res.removeListener('close',cancel);}

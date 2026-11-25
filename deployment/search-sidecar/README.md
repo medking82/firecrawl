@@ -31,9 +31,11 @@ instead of replacing it with the candidate core image.
 
 ## Known differences from the preload profile
 
-- The core sends SearXNG no result count. Page 1 asks DDG for 5 rows, so
-  `limit` above 5 returns at most 5 rows when DDG answers. SearXNG fallback
-  and later pages return up to 10 rows.
+- The core sends SearXNG no result count; it assumes 20 rows per page and
+  trims to `limit`. The worker therefore returns up to 20 rows per page. Page p
+  uses SearXNG pages 3p-2..3p (about 7 rows each) and stops at 20 rows; page 1
+  starts with one DDG page (10 rows). A short page means the engines had no
+  more rows.
 - The core's SearXNG request carries no `tbs` (time filter) or `country`.
 - A client disconnect no longer cancels the worker; the worker still stops at
   its 12 s deadline.
@@ -48,6 +50,13 @@ sudo python3 -I -B deploy_search_sidecar.py status
 sudo python3 -I -B deploy_search_sidecar.py apply      # backup under ~marck/.local/state/firecrawl-updater/search-sidecar/
 sudo python3 -I -B deploy_search_sidecar.py rollback   # newest backup, or --backup DIR
 ```
+
+`apply` from an earlier sidecar worker release (listed in
+`PREVIOUS_SIDECAR_WORKERS`) replaces only the worker file and recreates only
+`search-worker`; `rollback` restores it the same way. The updater contract
+admits one sidecar worker hash, so deploy the worker first and then install the
+matching updater; after a rollback, reinstall the previous updater from the
+installer's preimage backup.
 
 Both actions hold the updater `run.lock` and `update.lock`, recreate only
 `api` and `search-worker` with the live Compose files and exact image IDs, and
