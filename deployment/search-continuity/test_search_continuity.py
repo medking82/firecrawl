@@ -40,6 +40,27 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(result['searchContinuity']['primaryStatus'], 'primary_empty_unknown')
         self.assertEqual(primary.call_args.args[0]['excludeDomains'], list(policy.BAIDU))
 
+    def test_baidu_hint_only_where_backend_accepts_it(self):
+        ok = {'success': True, 'data': {'web': [GOOD]}}
+        primary = Mock(return_value=ok)
+        self.run_search(primary, includeDomains=['Example.COM.'])
+        sent = primary.call_args.args[0]
+        self.assertEqual(sent['includeDomains'], ['example.com'])
+        self.assertNotIn('excludeDomains', sent)
+        primary = Mock(return_value=ok)
+        policy.search({'query': 'public subject', 'limit': 3}, primary, Mock(), policy.FallbackGate(),
+                      domain_filters=False)
+        self.assertEqual(primary.call_args.args[0], {'query': 'public subject', 'limit': 3})
+        primary = Mock(return_value=ok)
+        self.run_search(primary, excludeDomains=['x.com'])
+        self.assertEqual(primary.call_args.args[0]['excludeDomains'], ['x.com', *policy.BAIDU])
+
+    def test_include_filter_still_drops_baidu_fallback_rows(self):
+        baidu = {'url': 'https://baike.baidu.com/item', 'title': 'b', 'description': ''}
+        result = self.run_search(Mock(side_effect=OSError()), Mock(return_value=[baidu, GOOD]),
+                                 includeDomains=['example.org', 'baike.baidu.com.hk'])
+        self.assertEqual([r['url'] for r in result['data']['web']], [GOOD['url']])
+
     def test_error_falls_back_once(self):
         for primary in (Mock(side_effect=OSError()), Mock(return_value={'success': False})):
             fallback = Mock(return_value=[GOOD])

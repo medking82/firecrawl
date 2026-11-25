@@ -200,8 +200,14 @@ def domain_matches(url, domains):
     return any(host == d or (host and host.endswith('.' + d)) for d in domains)
 
 
-def search(body, primary, fallback=exa_search, gate=FALLBACK_GATE):
-    """Return Firecrawl v2 envelope with additive provenance; callbacks are bounded."""
+def search(body, primary, fallback=exa_search, gate=FALLBACK_GATE, domain_filters=True):
+    """Return Firecrawl v2 envelope with additive provenance; callbacks are bounded.
+
+    domain_filters is False for /v1/search, whose schema has no domain fields.
+    The Baidu exclusion sent to the backend is only a hint: every returned row
+    is filtered again here, so it is added only where the backend accepts it
+    (v2 without includeDomains, which cannot be combined with excludeDomains).
+    """
     if not isinstance(body, dict) or not isinstance(body.get('query'), str) or not body['query'].strip():
         raise SearchFailure('invalid_search_query', 400)
     query, limit = body['query'], body.get('limit', 5)
@@ -216,7 +222,11 @@ def search(body, primary, fallback=exa_search, gate=FALLBACK_GATE):
         request[key] = [x.lower().rstrip('.') for x in domains]
     if any(blocked_host(d) for d in request['includeDomains']):
         raise SearchFailure('baidu_page_excluded', 400)
-    request['excludeDomains'] = list(dict.fromkeys(request['excludeDomains'] + list(BAIDU)))
+    excluded = list(dict.fromkeys(request['excludeDomains'] + list(BAIDU)))
+    if domain_filters and not request['includeDomains']:
+        request['excludeDomains'] = excluded
+    elif 'excludeDomains' not in body:
+        request.pop('excludeDomains')
     if not request['includeDomains']:
         request.pop('includeDomains')
     envelope, reason, explicit_empty = None, 'primary_unavailable', False
@@ -260,7 +270,7 @@ def search(body, primary, fallback=exa_search, gate=FALLBACK_GATE):
         if not isinstance(rows, list):
             raise SearchFailure('exa_invalid_response')
         rows = [r for r in rows if isinstance(r, dict) and allowed_url(r.get('url'))
-                and not domain_matches(r['url'], request['excludeDomains'])
+                and not domain_matches(r['url'], excluded)
                 and (not request.get('includeDomains') or domain_matches(r['url'], request['includeDomains']))]
     except (OSError, ValueError) as e:
         code = e.code if isinstance(e, SearchFailure) else 'exa_unavailable'

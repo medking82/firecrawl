@@ -21,6 +21,42 @@ from collections import OrderedDict
 STATE = Path('/home/marck/.local/state/strata-search-budget')
 SCOPE = contextvars.ContextVar('search_session_scope', default=None)
 FRESH = contextvars.ContextVar('search_fresh', default=False)
+ACTIVE_BUDGET = contextvars.ContextVar('search_active_budget', default=None)
+
+
+@contextlib.contextmanager
+def request_budget(budget):
+    token = ACTIVE_BUDGET.set(budget)
+    try:
+        yield
+    finally:
+        ACTIVE_BUDGET.reset(token)
+
+
+def check_budget():
+    budget = ACTIVE_BUDGET.get()
+    if budget is not None:
+        budget.remaining()
+
+
+def bounded_wait(seconds, event=None):
+    if ACTIVE_BUDGET.get() is None:
+        if event is not None:
+            return event.wait(seconds)
+        time.sleep(seconds)
+        return False
+    until = time.monotonic() + seconds
+    while True:
+        check_budget()
+        remaining = until - time.monotonic()
+        if remaining <= 0:
+            return False
+        if event is not None:
+            if event.wait(min(.025, remaining)):
+                check_budget()
+                return True
+        else:
+            time.sleep(min(.025, remaining))
 
 
 class BudgetBusy(ValueError):
@@ -80,6 +116,7 @@ class SharedBudget:
                 raise ValueError('search_budget_unsafe_lock')
             deadline = time.monotonic() + self.wait
             while True:
+                check_budget()
                 try:
                     fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     break
@@ -99,7 +136,8 @@ class SharedBudget:
             if now + delay > deadline:
                 raise BudgetBusy('shared_search_budget_busy')
             if delay:
-                time.sleep(delay)
+                bounded_wait(delay)
+            check_budget()
             os.lseek(descriptor, 0, os.SEEK_SET)
             os.write(descriptor, str(time.monotonic()).encode())
             os.ftruncate(descriptor, os.lseek(descriptor, 0, os.SEEK_CUR))
@@ -164,7 +202,7 @@ class SearchControls:
                 else:
                     leader = False
             if not leader:
-                if not flight['event'].wait(120.0):
+                if not bounded_wait(120.0, flight['event']):
                     raise BudgetBusy('shared_search_wait_timeout')
                 row = flight['result']
                 if row is not None:
