@@ -29,6 +29,16 @@ rollback images exist and preserves the running PostgreSQL and Playwright images
 The timer updates the core API only; monitor and browser overlays have separate
 owners and require their own compatibility review and deployment.
 
+## Search runtime contract
+
+`deployment/search_runtime_contract.py` is the reviewed source of the search
+runtime check. `deployment/render_search_contract.py` copies it into the three
+heredocs and two `exec` strings of `firecrawl_update.sh`; run it after every
+contract change, and `--check` (also run by
+`test_search_runtime_contract.py`) fails when the copies drift. The contract
+admits the `sidecar` and `preload` profiles described in
+`../search-sidecar/README.md`.
+
 ## Automatic promotion and retained authorization receipts
 
 The systemd service checks at 04:30 and 05:30 local time, each with up to 30
