@@ -18,6 +18,29 @@ spec.loader.exec_module(guard)
 
 
 class SyntaxAdmissionTests(unittest.TestCase):
+    def test_v869_profile_matches_reviewed_receipt(self):
+        contents = PATH.with_name('firecrawl-transport-20261126-v869.json').read_bytes()
+        receipt = json.loads(contents)
+        previous = guard.TRANSPORT_PROFILES[receipt['baseline_profile']]
+        current = guard.TRANSPORT_PROFILES[receipt['profile']]
+        self.assertEqual(current['receipt_sha256'], hashlib.sha256(contents).hexdigest())
+        self.assertEqual(current['hashes'], previous['hashes'] | receipt['hash_overrides'])
+        self.assertEqual(current['syntax_hashes'], previous['syntax_hashes'] | receipt['syntax_overrides'])
+        self.assertEqual(current['dependencies'], {k: type(previous['dependencies'][k])(v)
+                                                   for k, v in receipt['dependencies'].items()})
+        self.assertNotIn('just_bash_tree_sha256', current)
+        for name in receipt['unchanged_bytes']:
+            self.assertEqual(current['hashes'][name], previous['hashes'][name])
+
+    def test_only_audited_removals_may_be_absent(self):
+        removable = guard.removable_paths()
+        self.assertIn('/app/dist/src/lib/exchange.js', removable)
+        self.assertNotIn('/app/dist/src/scraper/scrapeURL/engines/utils/safeFetch.js', removable)
+        self.assertTrue(guard.digest_or_absent('/app/dist/src/lib/exchange.js', 'absent'))
+        self.assertFalse(guard.digest_or_absent('/app/dist/src/scraper/scrapeURL/engines/utils/safeFetch.js', 'absent'))
+        self.assertFalse(guard.digest_or_absent('/app/dist/src/lib/exchange.js', 'missing'))
+        self.assertIn('removable.has(name)', guard.probe_source())
+
     def test_v864_profile_matches_reviewed_receipt(self):
         contents = PATH.with_name('firecrawl-transport-20261126-v864.json').read_bytes()
         receipt = json.loads(contents)

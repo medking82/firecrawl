@@ -326,6 +326,48 @@ TRANSPORT_PROFILES["v2.11.864"] = {
         _build_root + 'lib/exchange-errors.js': '1a27512c5e4bd41c00d734c8d515d806977ec74ec321febcc25001ec61381160',
     },
 }
+# Frozen transport audit: deployment/firecrawl-transport-20261126-v869.json.
+# Upstream #6058 removed Exchange, fire-engine, GCS handoff and the hosted shell from the core.
+_v864 = TRANSPORT_PROFILES["v2.11.864"]
+TRANSPORT_PROFILES["v2.11.869"] = {
+    'receipt_sha256': 'c8afd72ada8bb0ea2506f5a997ce25f9659e77106b52a4a4e3014e027783f967',
+    'dependencies': dict(_v864['dependencies']),
+    'undici_lib_sha256': _v864['undici_lib_sha256'],
+    'hashes': _v864['hashes'] | {
+        _build_root + 'scraper/scrapeURL/engines/index.js': '954741ae949304584fc2f60b5b81891ca5de6dcbf72f92493fb90885b4177c2c',
+        _build_root + 'scraper/scrapeURL/engines/pdf/index.js': '7fd17c9688ebfdc9ddcad8d9debdf1f37cd87797c7cdfec7fa0fd98c77fcf282',
+        _build_root + 'scraper/scrapeURL/engines/document/index.js': 'a2e6e9957c1a9905de26914308b0b7dfa8df8581eb8d1cf3d1905a6963126998',
+        _build_root + 'scraper/scrapeURL/index.js': 'c7f9d037833eb9d1feaafb77ef9d05952493203ca6b54936827ab7c53288adda',
+        _build_root + 'controllers/v2/types.js': 'a981c83a24e5a744f331688924098a59da5082a966584de2a5a764f8ff9e48b3',
+        _build_root + 'lib/exchange.js': 'absent',
+    },
+    'syntax_hashes': _v864['syntax_hashes'] | {
+        _build_root + 'config.js': '858a797908602996ef3e7532c11d38a823fc813815ef1ee6c5ac8207ff1161e6',
+        _build_root + 'controllers/v2/types.js': '89bb3bc5b6163ccd0154ef7b715982a7d7dedb1caa8bd63339d87224f4d9e3d2',
+        _build_root + 'harness.js': '4b1f1141c007a2264258826a852f19ac2154ba329bd250c036d71d1a85026333',
+        _build_root + 'index.js': 'eee73a2d077e5e3aa9f51264ebde8039f57752c3f6b753de497de9b0235f2c67',
+        _build_root + 'lib/api-startup.js': '7dd7eb31a17404b8f790d242ec5d24cecd4df9864280899ea077ea165042c060',
+        _build_root + 'lib/exchange-errors.js': 'absent',
+        _build_root + 'lib/exchange.js': 'absent',
+        _build_root + 'lib/reserved-capacity.js': 'absent',
+        _build_root + 'lib/x-twitter-url.js': 'absent',
+        _build_root + 'routes/exchange-files.js': 'absent',
+        _build_root + 'scraper/scrapeURL/engines/document/index.js': 'f14bc798ab991e500d002165afabd1d6241e67e404974f9c7e61650e0f93cecf',
+        _build_root + 'scraper/scrapeURL/engines/index.js': '40ee403e9fed488037d8369d922c619cfb64a086e48cd444af44b2f82ee139a2',
+        _build_root + 'scraper/scrapeURL/engines/pdf/index.js': '6a67f9db765cb0c21583802e9700eab71f171ed5300677a98ec5a37c7bb5e3b2',
+        _build_root + 'scraper/scrapeURL/engines/utils/specialtyHandler.js': 'f9da11a2fd312926b0b4ba29a8113e31038a38ebddb39422fcf6d61e53c32f30',
+        _build_root + 'scraper/scrapeURL/error.js': '2679eb88577bebe77b9bf0778e7602c6e83e2a8e99a306a75825eea62af86aeb',
+        _build_root + 'scraper/scrapeURL/hooks.js': 'd005b24181479921a152dcdbf89cc9338abfa5ffb8160b7fff0a059a85847bbf',
+        _build_root + 'scraper/scrapeURL/index.js': '5c3ead8df1a8200c77e016b1e40f351c57af0d9ab5cf0b6d91602506a5e550c0',
+        _build_root + 'service/core-parts.js': '2cb51119cfb1d8c7ad02d95f94288e4a6392acbf1d44ac1a2af2b464736735eb',
+        _build_root + 'service/defaults.js': '418fd751c3fc0aeb94202a724e3bbcd699f4394f28982c20c57b8d952575024b',
+        _build_root + 'service/engines.js': '3f758af490229ce26ba7fcce7fe7b5eee2c39ca6d49f23c3e726955653532975',
+        _build_root + 'service/hooks.js': '74d2dcee3a321558c8b1f2c3d858ab6e7276f962fb50d39df504b7c08bc07570',
+        _build_root + 'service/http.js': '32c21fb24aa20a9abc47932324e4fbb92e2d0bf4856ec23d21531eb06b79de0e',
+        _build_root + 'service/modules.js': '62223a538b7a422d74f087f0951acb4576a3ab90beedc1cb44000a98804eba4a',
+        _build_root + 'service/service.js': 'd7bd0d7f43f79af7cf086ebfbd9d74cc53b7a9a7bf7b150fdd3f55783f3321bf',
+    },
+}
 EXPECTED_PREDICATES = {
     "ALLOW_LOCAL_WEBHOOKS_true": False,
     "PROXY_SERVER_nonempty": False,
@@ -345,6 +387,7 @@ EXPECTED_PREDICATES = {
     "PUBSUB_PROJECT_ID_nonempty": False,
     "VERTEX_USE_ADC_nonempty": False,
 }
+ABSENT = "absent"
 TOTAL_TIMEOUT = 30
 COMMAND_TIMEOUT = 10
 MAX_OUTPUT = 16384
@@ -401,7 +444,7 @@ def probe_source():
     return """
 const fs = require('fs'), crypto = require('crypto'), path = require('path');
 const load = require('module').createRequire('/app/dist/src/scraper/scrapeURL/engines/utils/safeFetch.js');
-const paths = PATHS, predicates = PREDICATES;
+const paths = PATHS, predicates = PREDICATES, removable = new Set(REMOVABLE);
 try {
   const undiciPackage = load.resolve('undici/package.json');
   const ipaddrPackage = load.resolve('ipaddr.js/package.json');
@@ -414,6 +457,7 @@ try {
   for (const name of paths) {
     const resolved = name === 'undici/client.js' ? path.join(path.dirname(undiciPackage), 'lib/dispatcher/client.js')
       : name === 'ipaddr.js' ? load.resolve('ipaddr.js') : name;
+    if (removable.has(name) && !fs.existsSync(resolved)) { hashes[name] = 'absent'; continue; }
     const stat = fs.statSync(resolved);
     if (!stat.isFile() || stat.size > 1048576) throw new Error();
     hashes[name] = crypto.createHash('sha256').update(fs.readFileSync(resolved)).digest('hex');
@@ -445,7 +489,8 @@ try {
 } catch (_) {
   process.exitCode = 1;
 }
-""".replace("PATHS", json.dumps(list(EXPECTED_HASHES))).replace("PREDICATES", json.dumps(EXPECTED_PREDICATES))
+""".replace("PATHS", json.dumps(list(EXPECTED_HASHES))).replace("PREDICATES", json.dumps(EXPECTED_PREDICATES)) \
+        .replace("REMOVABLE", json.dumps(sorted(removable_paths())))
 
 
 def syntax_normalizer_source():
@@ -472,9 +517,21 @@ function syntaxHash(source) {
 """
 
 
+def removable_paths():
+    """Paths an audited profile records as removed; any other missing file fails."""
+    return {key for profile in TRANSPORT_PROFILES.values()
+            for table in ('hashes', 'syntax_hashes') for key, value in profile.get(table, {}).items()
+            if value == ABSENT}
+
+
+def digest_or_absent(key, value):
+    return isinstance(value, str) and (re.fullmatch(r"[0-9a-f]{64}", value) is not None
+                                       or (value == ABSENT and key in removable_paths()))
+
+
 def syntax_probe_source(paths):
     return syntax_normalizer_source() + """
-const fs = require('node:fs'), path = require('node:path');
+const fs = require('node:fs'), path = require('node:path'), removable = new Set(REMOVABLE);
 const load = require('node:module').createRequire('/app/dist/src/scraper/scrapeURL/engines/utils/safeFetch.js');
 try {
   const syntax_hashes = {};
@@ -482,13 +539,14 @@ try {
     const resolved = name === 'undici/client.js'
       ? path.join(path.dirname(load.resolve('undici/package.json')), 'lib/dispatcher/client.js')
       : name === 'ipaddr.js' ? load.resolve('ipaddr.js') : name;
+    if (removable.has(name) && !fs.existsSync(resolved)) { syntax_hashes[name] = 'absent'; continue; }
     const stat = fs.lstatSync(resolved);
     if (!stat.isFile() || stat.size > 1048576) throw new Error();
     syntax_hashes[name] = syntaxHash(fs.readFileSync(resolved, 'utf8'));
   }
   console.log(JSON.stringify({syntax_hashes}));
 } catch (_) { process.exitCode = 1; }
-""".replace('PATHS', json.dumps(list(paths)))
+""".replace('PATHS', json.dumps(list(paths))).replace('REMOVABLE', json.dumps(sorted(removable_paths())))
 
 
 def undici_tree_probe_source(package="undici"):
@@ -619,8 +677,7 @@ def _preflight():
             or any(not isinstance(probe[key], dict) for key in ("hashes", "dependencies", "predicates", "safeguards"))):
         raise GuardError("code_and_config", "invalid_shape")
     if (set(probe["hashes"]) != set(EXPECTED_HASHES)
-            or any(not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value)
-                   for value in probe["hashes"].values())):
+            or any(not digest_or_absent(key, value) for key, value in probe["hashes"].items())):
         raise GuardError("code_and_config", "invalid_shape")
     def dependencies_match(profile):
         return (probe["dependencies"] == profile["dependencies"]
@@ -646,8 +703,7 @@ def _preflight():
                           "code_and_config", deadline)
         if (set(syntax) != {"syntax_hashes"} or not isinstance(syntax["syntax_hashes"], dict)
                 or set(syntax["syntax_hashes"]) != set(paths)
-                or any(not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value)
-                       for value in syntax["syntax_hashes"].values())):
+                or any(not digest_or_absent(key, value) for key, value in syntax["syntax_hashes"].items())):
             raise GuardError("code_and_config", "invalid_syntax_shape")
         matched = next((name for name, profile in syntax_candidates
                         if all(syntax["syntax_hashes"][key] == value

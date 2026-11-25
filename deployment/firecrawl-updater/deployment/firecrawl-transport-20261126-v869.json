@@ -1,0 +1,69 @@
+{
+ "schema": 2,
+ "profile": "v2.11.869",
+ "scope": "Public static-fetch, open-source engine set (document, fetch, pdf, playwright, wikipedia), service module defaults and request validation after upstream #6058 removed Exchange, fire-engine, GCS file handoff and hosted shell from the core.",
+ "source_commit": "83ed15240edefc4df591b2b2c229a0e57040a574",
+ "baseline_profile": "v2.11.864",
+ "candidate_api_image": "sha256:75666ba6a8ae606453284aeaf87e6c248d375961fad99293dfd87c407b597b82",
+ "export_archive_sha256": "b76e9bcb444072327de8c35b6a0c2c3f747db2618a742412b90c22ea7518e9f9",
+ "export_file_count": 966,
+ "qualification_host": "PC Ubuntu-26.04 (same image ID as GA401 candidate)",
+ "dependencies": {
+  "node_major": "22",
+  "undici": "7.30.1",
+  "ipaddr_js": "2.2.0"
+ },
+ "undici_lib_sha256": "213bda9bf7c6860b6714484b606b431c7bdbe4652a20be22e3e20e8b96e1187c",
+ "dependency_tree_counts": {
+  "undici_lib": "116"
+ },
+ "hosted_shell": "absent",
+ "unchanged_bytes": [
+  "/app/dist/src/scraper/scrapeURL/engines/fetch/index.js",
+  "/app/dist/src/scraper/scrapeURL/engines/utils/downloadFile.js",
+  "/app/dist/src/scraper/scrapeURL/engines/utils/safeFetch.js",
+  "ipaddr.js",
+  "undici/client.js"
+ ],
+ "review": [
+  "safeFetch.js, downloadFile.js and engines/fetch/index.js are byte-identical to v2.11.864; undici lib tree digest unchanged.",
+  "No added fetch/undici/axios/http/child_process/WebSocket use in the changed modules (v2.11.864..83ed15240 source diff).",
+  "Engines reduced to document, fetch, javascriptReturns, pdf, playwright, wikipedia; Exchange, fire-engine variants, image and index removed.",
+  "Built-in GCS file download removed; handoff needs an extension-supplied downloader, none in core.",
+  "URL schema (http/https only, localhost and private ranges rejected) unchanged; default blocklist and openAuth equal the v2.11.864 self-hosted behaviour."
+ ],
+ "hash_overrides": {
+  "/app/dist/src/scraper/scrapeURL/engines/index.js": "954741ae949304584fc2f60b5b81891ca5de6dcbf72f92493fb90885b4177c2c",
+  "/app/dist/src/scraper/scrapeURL/engines/pdf/index.js": "7fd17c9688ebfdc9ddcad8d9debdf1f37cd87797c7cdfec7fa0fd98c77fcf282",
+  "/app/dist/src/scraper/scrapeURL/engines/document/index.js": "a2e6e9957c1a9905de26914308b0b7dfa8df8581eb8d1cf3d1905a6963126998",
+  "/app/dist/src/scraper/scrapeURL/index.js": "c7f9d037833eb9d1feaafb77ef9d05952493203ca6b54936827ab7c53288adda",
+  "/app/dist/src/controllers/v2/types.js": "a981c83a24e5a744f331688924098a59da5082a966584de2a5a764f8ff9e48b3",
+  "/app/dist/src/lib/exchange.js": "absent"
+ },
+ "syntax_overrides": {
+  "/app/dist/src/config.js": "858a797908602996ef3e7532c11d38a823fc813815ef1ee6c5ac8207ff1161e6",
+  "/app/dist/src/controllers/v2/types.js": "89bb3bc5b6163ccd0154ef7b715982a7d7dedb1caa8bd63339d87224f4d9e3d2",
+  "/app/dist/src/harness.js": "4b1f1141c007a2264258826a852f19ac2154ba329bd250c036d71d1a85026333",
+  "/app/dist/src/index.js": "eee73a2d077e5e3aa9f51264ebde8039f57752c3f6b753de497de9b0235f2c67",
+  "/app/dist/src/lib/api-startup.js": "7dd7eb31a17404b8f790d242ec5d24cecd4df9864280899ea077ea165042c060",
+  "/app/dist/src/lib/exchange-errors.js": "absent",
+  "/app/dist/src/lib/exchange.js": "absent",
+  "/app/dist/src/lib/reserved-capacity.js": "absent",
+  "/app/dist/src/lib/x-twitter-url.js": "absent",
+  "/app/dist/src/routes/exchange-files.js": "absent",
+  "/app/dist/src/scraper/scrapeURL/engines/document/index.js": "f14bc798ab991e500d002165afabd1d6241e67e404974f9c7e61650e0f93cecf",
+  "/app/dist/src/scraper/scrapeURL/engines/index.js": "40ee403e9fed488037d8369d922c619cfb64a086e48cd444af44b2f82ee139a2",
+  "/app/dist/src/scraper/scrapeURL/engines/pdf/index.js": "6a67f9db765cb0c21583802e9700eab71f171ed5300677a98ec5a37c7bb5e3b2",
+  "/app/dist/src/scraper/scrapeURL/engines/utils/specialtyHandler.js": "f9da11a2fd312926b0b4ba29a8113e31038a38ebddb39422fcf6d61e53c32f30",
+  "/app/dist/src/scraper/scrapeURL/error.js": "2679eb88577bebe77b9bf0778e7602c6e83e2a8e99a306a75825eea62af86aeb",
+  "/app/dist/src/scraper/scrapeURL/hooks.js": "d005b24181479921a152dcdbf89cc9338abfa5ffb8160b7fff0a059a85847bbf",
+  "/app/dist/src/scraper/scrapeURL/index.js": "5c3ead8df1a8200c77e016b1e40f351c57af0d9ab5cf0b6d91602506a5e550c0",
+  "/app/dist/src/service/core-parts.js": "2cb51119cfb1d8c7ad02d95f94288e4a6392acbf1d44ac1a2af2b464736735eb",
+  "/app/dist/src/service/defaults.js": "418fd751c3fc0aeb94202a724e3bbcd699f4394f28982c20c57b8d952575024b",
+  "/app/dist/src/service/engines.js": "3f758af490229ce26ba7fcce7fe7b5eee2c39ca6d49f23c3e726955653532975",
+  "/app/dist/src/service/hooks.js": "74d2dcee3a321558c8b1f2c3d858ab6e7276f962fb50d39df504b7c08bc07570",
+  "/app/dist/src/service/http.js": "32c21fb24aa20a9abc47932324e4fbb92e2d0bf4856ec23d21531eb06b79de0e",
+  "/app/dist/src/service/modules.js": "62223a538b7a422d74f087f0951acb4576a3ab90beedc1cb44000a98804eba4a",
+  "/app/dist/src/service/service.js": "d7bd0d7f43f79af7cf086ebfbd9d74cc53b7a9a7bf7b150fdd3f55783f3321bf"
+ }
+}

@@ -8,7 +8,7 @@ umask 077
 repo=${FIRECRAWL_REPO:-/home/marck/github/firecrawl}
 canonical_state_dir=/home/marck/.local/state/firecrawl-updater
 state_dir=${FIRECRAWL_UPDATE_STATE_DIR:-$canonical_state_dir}
-guard_sha256=84537c7f2b6c8c9b5e5bc7f171921fde11ca21b4d6f990075e69ec552be52c0c
+guard_sha256=c07ae34841753baaa6c1c2df616598c9f6f231d1a76f6c56de38b6a0518fde3f
 guard_file="$canonical_state_dir/guards/$guard_sha256.py"
 worktree_root=${FIRECRAWL_WORKTREE_ROOT:-/home/marck/github/worktrees/firecrawl}
 security_refresh=${FIRECRAWL_SECURITY_REFRESH:-/home/marck/.local/lib/firecrawl-security-refresh/deployment/self-hosted-auto/security_refresh.py}
