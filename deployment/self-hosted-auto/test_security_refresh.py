@@ -155,3 +155,27 @@ class Policy(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main()
+
+
+class Readiness(unittest.TestCase):
+    def serve(self, routes):
+        import http.server, threading
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                status, body = routes.get(self.path, (404, b'{"success":false}'))
+                self.send_response(status); self.end_headers(); self.wfile.write(body)
+            def log_message(self, *args): pass
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close); self.addCleanup(server.shutdown)
+        return server.server_address[1]
+
+    def test_new_core_path_and_legacy_v0_services(self):
+        ok = (200, b'{"status":"ok"}')
+        self.assertTrue(s.readiness(self.serve({'/health/readiness': ok})))
+        self.assertTrue(s.readiness(self.serve({'/v0/health/readiness': ok})))
+        self.assertFalse(s.readiness(self.serve({'/health/readiness': (200, b'{"status":"starting"}')})))
+
+    def test_unreachable_port_is_not_ready(self):
+        port = self.serve({})
+        self.assertFalse(s.readiness(port))
