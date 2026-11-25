@@ -33,6 +33,18 @@ class Stalling(http.server.BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', 0))))
         mode = self.server.mode
         start = time.monotonic()
+        if mode == 'removed-cache-options':
+            self.server.requests.append((self.path, body))
+            keys = [key for key in body if key in ('maxAge', 'storeInCache', 'unknown')]
+            payload = ({'success': False, 'code': 'BAD_REQUEST', 'details': [
+                {'code': 'unrecognized_keys', 'keys': keys, 'path': []}]}
+                if keys else {'success': True, 'data': {'markdown': 'example'}})
+            raw = json.dumps(payload).encode()
+            self.send_response(400 if keys else 200)
+            self.send_header('Content-Length', str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+            return
         if mode in ('v1-removed', 'v1-error'):
             self.server.requests.append((self.path, body))
         if self.path == '/v1/search' and mode in ('v1-removed', 'v1-error'):
@@ -144,6 +156,29 @@ class DeadlineTests(unittest.TestCase):
         self.assertEqual(status, 404)
         self.assertEqual(body['error'], 'search not found')
         self.assertEqual([path for path, _ in self.backend.requests], ['/v1/search'])
+
+    def test_scrape_retries_only_removed_no_cache_fields(self):
+        self.backend.mode = 'removed-cache-options'
+        base = {'url': 'https://example.org', 'formats': ['markdown']}
+        for options, expected in [({'maxAge': 0, 'storeInCache': False}, 200),
+                                  ({'maxAge': 1000, 'storeInCache': False}, 400),
+                                  ({'maxAge': 0, 'unknown': True}, 400)]:
+            with self.subTest(options=options):
+                self.backend.requests.clear()
+                body = {**base, **options}
+                connection = http.client.HTTPConnection(*self.server.server_address, timeout=5)
+                try:
+                    connection.request('POST', '/v2/scrape', json.dumps(body),
+                                       {'Content-Type': 'application/json'})
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, expected)
+                    self.assertEqual(json.loads(response.read())['success'], expected == 200)
+                finally:
+                    connection.close()
+                requests = [('/v2/scrape', body)]
+                if expected == 200:
+                    requests.append(('/v2/scrape', base))
+                self.assertEqual(self.backend.requests, requests)
 
     def wait_backend_closed(self, limit=3.0):
         end = time.monotonic() + limit
