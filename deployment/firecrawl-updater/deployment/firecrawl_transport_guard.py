@@ -469,9 +469,13 @@ try {
   }
   // Zod stringbool also accepts truthy spellings such as '1' or 'yes'.
   // Require the audited safe literals, not merely the absence of 'true'.
+  const dbAuth = process.env.USE_DB_AUTHENTICATION;
+  const configPath = '/app/dist/src/config.js';
   const safeguards = {
     private_bypass_absent_or_empty: !process.env.ALLOW_LOCAL_WEBHOOKS,
-    db_auth_canonical_false: process.env.USE_DB_AUTHENTICATION === 'false',
+    db_auth_canonical_false: dbAuth === 'false' ||
+      (dbAuth === undefined && fs.statSync(configPath).size <= 1048576 &&
+        !fs.readFileSync(configPath).includes('USE_DB_AUTHENTICATION')),
     dotenv_absent: !fs.existsSync('/app/.env'),
     alternate_dotenv_unconfigured: !process.env.DOTENV_CONFIG_PATH,
     expected_working_directory: process.cwd() === '/app',

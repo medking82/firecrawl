@@ -62,6 +62,17 @@ class BackendReply(Exception):
         self.status, self.headers, self.raw = status, headers, raw
 
 
+def legacy_search_route_missing(raw):
+    if b'<pre>Cannot POST /v1/search</pre>' in raw:
+        return True
+    try:
+        error = json.loads(raw)
+    except (ValueError, UnicodeError):
+        return False
+    return (isinstance(error, dict) and error.get('code') == 'NOT_FOUND'
+            and error.get('error') == 'POST /v1/search is not a Firecrawl API endpoint.')
+
+
 def service_route(path):
     for name, prefixes in (('monitor', ('/v2/monitor',)), ('browser', ('/v2/browser', '/v2/interact'))):
         if any(path == p or path.startswith(p + '/') for p in prefixes):
@@ -253,7 +264,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             response = connection.getresponse()
             if path == '/v1/search' and response.status == 404:
                 missing_route = read_bounded(response, stage, MAX_JSON, 'backend_error_response_too_large', 502)
-                if b'<pre>Cannot POST /v1/search</pre>' not in missing_route:
+                if not legacy_search_route_missing(missing_route):
                     raise BackendReply(response.status, response.getheaders(), missing_route)
                 connection.close()
                 connection = transport.LoopbackConnection(self.server.backend[1], stage)

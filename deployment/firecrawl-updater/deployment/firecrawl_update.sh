@@ -8,7 +8,7 @@ umask 077
 repo=${FIRECRAWL_REPO:-/home/marck/github/firecrawl}
 canonical_state_dir=/home/marck/.local/state/firecrawl-updater
 state_dir=${FIRECRAWL_UPDATE_STATE_DIR:-$canonical_state_dir}
-guard_sha256=c07ae34841753baaa6c1c2df616598c9f6f231d1a76f6c56de38b6a0518fde3f
+guard_sha256=4cc46752ace6d65f4f33e3d4a0a2cc51af882ca0c2337b8a9fac40875b34b1d4
 guard_file="$canonical_state_dir/guards/$guard_sha256.py"
 worktree_root=${FIRECRAWL_WORKTREE_ROOT:-/home/marck/github/worktrees/firecrawl}
 security_refresh=${FIRECRAWL_SECURITY_REFRESH:-/home/marck/.local/lib/firecrawl-security-refresh/deployment/self-hosted-auto/security_refresh.py}
@@ -948,10 +948,11 @@ try:
     if env.get('ALLOW_LOCAL_WEBHOOKS') or env.get('DOTENV_CONFIG_PATH') or (env.get('NODE_OPTIONS') and not search_files) or env.get('USE_DB_AUTHENTICATION') not in (None,'false'):
         raise ValueError('candidate_safeguards')
     # No credentials, volumes, service entrypoint or network in the probe container.
+    auth_environment = ['--env','USE_DB_AUTHENTICATION=false'] if env.get('USE_DB_AUTHENTICATION') == 'false' else []
     identity=run(['docker','run','-d','--network','none','--read-only','--cap-drop','ALL',
         '--security-opt','no-new-privileges','--memory','256m','--cpus','1','--pids-limit','32',
         '--name','firecrawl-audit-'+uuid.uuid4().hex,'--entrypoint','node','--workdir','/app',
-        '--env','USE_DB_AUTHENTICATION=false','--env','PLAYWRIGHT_MICROSERVICE_URL=configured',
+        *auth_environment,'--env','PLAYWRIGHT_MICROSERVICE_URL=configured',
         images['api']['image'],'-e','setTimeout(()=>{},180000)']).strip()
     if not re.fullmatch('[0-9a-f]{64}',identity): raise ValueError('candidate_identity')
     # Audit all installed copies in this exact isolated API image, without changing it.
