@@ -1193,6 +1193,8 @@ def baseline_files(paths):
         # security-refresh owners; rollback re-pins every service image below.
         known = ((overlay.parent.parent == state and overlay.parent.name.startswith('candidate.')
                   and (overlay.name == 'images.json' or re.fullmatch(r'images\.candidate-patch-promotion-[0-9a-f]{32}\.json', overlay.name)))
+                 or (overlay.parent.parent == state and re.fullmatch(r'preimage\.[A-Za-z0-9]{8}', overlay.parent.name)
+                     and overlay.name == 'compose-images.json')
                  or (overlay.parent.parent == state and re.fullmatch(r'brotli-promotion-[0-9a-f]{32}', overlay.parent.name)
                      and overlay.name == 'core-candidate.json')
                  or (overlay.parent.parent == security and re.fullmatch(r'run-[0-9a-f]{32}', overlay.parent.name)

@@ -53,7 +53,8 @@ class ResearchUpdaterTests(unittest.TestCase):
             exec(source,namespace)
             base=[str(root/name) for name in ('docker-compose.yaml','docker-compose.override.yaml')]
             for name,filename in (('candidate.old','images.json'),
-                                  ('candidate.new','images.candidate-patch-promotion-'+'c'*32+'.json')):
+                                  ('candidate.new','images.candidate-patch-promotion-'+'c'*32+'.json'),
+                                  ('preimage.9rovP1WN','compose-images.json')):
                 folder=state/name;folder.mkdir(); overlay=folder/filename
                 overlay.write_text(json.dumps({'services':{'api':{'image':'sha256:'+'a'*64,'pull_policy':'never'}}}))
                 with patch.object(Path,'cwd',return_value=root):
