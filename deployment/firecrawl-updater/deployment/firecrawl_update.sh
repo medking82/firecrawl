@@ -15,6 +15,8 @@ security_refresh=${FIRECRAWL_SECURITY_REFRESH:-/home/marck/.local/lib/firecrawl-
 security_journals=${FIRECRAWL_SECURITY_STATE:-/home/marck/.local/state/firecrawl-security-refresh}
 notice_repo=${FIRECRAWL_NOTICE_REPO:-medking82/pc-maintenance}
 notice_owner=medking82
+trial_port=${FIRECRAWL_TRIAL_PORT:-3012}
+trial_project=${FIRECRAWL_TRIAL_PROJECT:-firecrawl-trial}
 previous_commit=""
 previous_tag=""
 rollback_active=0
@@ -448,6 +450,255 @@ except Exception:
     raise SystemExit('Firecrawl smoke failed: ' + failure) from None
 print('Firecrawl transport, search and scrape smoke passed')
 PYSMOKE
+}
+
+# Run the admitted candidate as a separate Compose project with its own queue,
+# database, Redis, RabbitMQ and browser services before the live cutover. The
+# live project is never touched; a failure leaves the approval for the next run.
+trial_candidate() {
+  log "trial: starting $latest_tag as $trial_project on 127.0.0.1:$trial_port"
+  python3 -B - "$repo" "$candidate_dir" "$candidate_evidence" "$trial_port" "$trial_project" <<'PYTRIAL'
+import datetime as dt
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import socket
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+
+# BEGIN TRIAL CONFIG
+SEARCH_SERVICES = {'searxng', 'search-egress', 'search-worker'}
+SEARCH_NETWORKS = {'search', 'search_egress'}
+SEARCH_ENVIRONMENT = ('NODE_OPTIONS', 'SEARCH_TRACE', 'SEARCH_WORKER_URL')
+FIXTURE_ENDPOINT = 'http://search-worker:8081'
+# Reduced concurrency for a single request at a time; values never increase.
+LIMITS = {'NUM_WORKERS_PER_QUEUE': 2, 'MAX_CONCURRENT_JOBS': 2, 'CRAWL_CONCURRENT_REQUESTS': 2,
+          'BROWSER_POOL_SIZE': 1}
+FIXTURE = r"""
+const http = require('http');
+http.createServer((request, response) => {
+  const url = new URL(request.url, 'http://fixture');
+  if (url.pathname !== '/search') { response.statusCode = 404; response.end(); return; }
+  response.setHeader('Content-Type', 'application/json');
+  response.end(JSON.stringify({query: url.searchParams.get('q') || '', results: [
+    {url: 'https://example.com/', title: 'Example Domain', content: 'Example Domain for documentation.'}]}));
+}).listen(8081, '0.0.0.0');
+"""
+
+
+def trial_config(config, images, port, project):
+    """Turn the rendered candidate Compose config into an isolated trial project."""
+    if project == 'firecrawl' or not re.fullmatch(r'firecrawl-trial[a-z0-9-]{0,20}', project):
+        raise ValueError('trial_project_name')
+    services, networks, volumes = {}, set(), set()
+    for name, service in config['services'].items():
+        if name in SEARCH_SERVICES:
+            continue
+        value = json.loads(json.dumps(service))
+        if 'container_name' in value:
+            raise ValueError('trial_container_name')
+        if name not in images:
+            raise ValueError('trial_image_missing')
+        value.pop('build', None)
+        value.pop('ports', None)
+        value.update(image=images[name]['image'], pull_policy='never', restart='no')
+        attached = [key for key in (value.get('networks') or {'default': None}) if key not in SEARCH_NETWORKS]
+        if not attached:
+            raise ValueError('trial_network_missing')
+        value['networks'] = {key: None for key in attached}
+        networks.update(attached)
+        if value.get('depends_on'):
+            value['depends_on'] = {key: item for key, item in value['depends_on'].items()
+                                   if key not in SEARCH_SERVICES}
+        mounts = []
+        for item in value.get('volumes') or []:
+            if item.get('type') == 'volume' and item.get('source'):
+                mounts.append(item)
+                volumes.add(item['source'])
+            elif (name == 'api' and item.get('type') == 'bind' and item.get('read_only') is True
+                  and str(item.get('source', '')).startswith('/opt/firecrawl-search/')):
+                continue
+            else:
+                raise ValueError('trial_unsupported_mount')
+        if 'volumes' in value:
+            value['volumes'] = mounts
+        services[name] = value
+    if 'api' not in services:
+        raise ValueError('trial_api_missing')
+    for kind, used in (('networks', networks), ('volumes', volumes)):
+        for key in used:
+            if (config.get(kind) or {}).get(key, {}).get('external'):
+                raise ValueError('trial_external_' + kind)
+    secret = {'POSTGRES_PASSWORD': secrets.token_hex(24), 'BULL_AUTH_KEY': secrets.token_hex(24)}
+    for value in services.values():
+        environment = value.get('environment') or {}
+        for key, replacement in secret.items():
+            if key in environment:
+                environment[key] = replacement
+    api = services['api']
+    environment = api.setdefault('environment', {})
+    for key in SEARCH_ENVIRONMENT:
+        environment.pop(key, None)
+    environment['SEARXNG_ENDPOINT'] = FIXTURE_ENDPOINT
+    for key, limit in LIMITS.items():
+        if key in environment and str(environment[key]).isdigit():
+            environment[key] = str(min(int(environment[key]), limit))
+    target = int(environment.get('PORT') or 3002)
+    api['ports'] = [{'mode': 'ingress', 'host_ip': '127.0.0.1', 'target': target,
+                     'published': str(port), 'protocol': 'tcp'}]
+    first = sorted(api['networks'])[0]
+    api.setdefault('depends_on', {})['search-worker'] = {'condition': 'service_started', 'required': True}
+    services['search-worker'] = {
+        'image': images['api']['image'], 'pull_policy': 'never', 'restart': 'no',
+        'entrypoint': ['node'], 'command': ['-e', FIXTURE], 'working_dir': '/app', 'user': '1000:1000',
+        'read_only': True, 'cap_drop': ['ALL'], 'security_opt': ['no-new-privileges:true'],
+        'mem_limit': '134217728', 'networks': {first: None}}
+    return {'name': project, 'services': services,
+            'networks': {key: {'driver': 'bridge'} for key in sorted(networks)},
+            'volumes': {key: {} for key in sorted(volumes)}}
+# END TRIAL CONFIG
+
+
+def run(args, timeout=120, **kwargs):
+    return subprocess.run(args, check=True, capture_output=True, text=True, timeout=timeout, **kwargs).stdout
+
+
+def live_identity():
+    ids = run(['docker', 'ps', '-aq', '--filter', 'label=com.docker.compose.project=firecrawl']).split()
+    rows = json.loads(run(['docker', 'inspect', *ids])) if ids else []
+    return sorted((row['Id'], row['Image'], row['State']['StartedAt'], row['State']['Running']) for row in rows)
+
+
+def project_containers(project):
+    return run(['docker', 'ps', '-aq', '--filter', 'label=com.docker.compose.project=' + project]).split()
+
+
+def teardown(project):
+    subprocess.run(['docker', 'compose', '--project-name', project, 'down', '--volumes', '--remove-orphans',
+                    '--timeout', '10'], capture_output=True, timeout=300)
+    return not project_containers(project)
+
+
+if __name__ == '__main__':
+    repo, source, evidence, port, project = sys.argv[1:6]
+    port, evidence = int(port), Path(evidence)
+    report = {'schema': 1, 'status': 'failed', 'project': project, 'port': port,
+              'started_at': dt.datetime.now(dt.timezone.utc).isoformat(), 'checks': {}}
+    failure = 'trial_setup'
+    try:
+        images = json.loads((evidence / 'images.json').read_text())['services']
+        report['api_image'] = images['api']['image']
+        compose = ['docker', 'compose', '--project-name', 'firecrawl', '--env-file', repo + '/.env',
+                   '-f', source + '/docker-compose.yaml', '-f', repo + '/docker-compose.override.yaml',
+                   '-f', str(evidence / 'images.json')]
+        definition = trial_config(json.loads(run([*compose, 'config', '--format', 'json'])), images, port, project)
+        report['services'] = sorted(definition['services'])
+        failure = 'trial_leftover'
+        if not teardown(project):
+            raise RuntimeError()
+        failure = 'trial_port_busy'
+        with socket.socket() as probe:
+            # Reuse allows TIME_WAIT from an earlier trial; a listener still fails the bind.
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            probe.bind(('127.0.0.1', port))
+        before = live_identity()
+        failure = 'trial_start'
+        run(['docker', 'compose', '--project-name', project, '-f', '-', 'up', '-d', '--no-build', '--pull', 'never'],
+            timeout=600, input=json.dumps(definition), cwd=str(evidence))
+        endpoint = 'http://127.0.0.1:' + str(port)
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        failure = 'readiness'
+        deadline = time.monotonic() + 240
+        while True:
+            try:
+                with opener.open(endpoint + '/health/readiness', timeout=5) as response:
+                    if response.status == 200:
+                        break
+            except (OSError, urllib.error.URLError):
+                pass
+            if time.monotonic() > deadline:
+                raise RuntimeError()
+            time.sleep(3)
+        report['checks']['readiness'] = 'passed'
+
+        def post(route, body):
+            request = urllib.request.Request(endpoint + route, data=json.dumps(body).encode(), method='POST',
+                                             headers={'Content-Type': 'application/json'})
+            with opener.open(request, timeout=90) as response:
+                value = json.loads(response.read(4 * 1024 * 1024))
+            if not isinstance(value, dict) or value.get('success') is not True:
+                raise ValueError()
+            return value.get('data')
+
+        def web(data):
+            rows = data.get('web') if isinstance(data, dict) else None
+            if not isinstance(rows, list) or not rows or 'example.com' not in str(rows[0].get('url', '')):
+                raise ValueError()
+            return rows[0]
+
+        def search_v2():
+            web(post('/v2/search', {'query': 'firecrawl trial', 'limit': 1}))
+
+        def search_scrape():
+            row = web(post('/v2/search', {'query': 'firecrawl trial', 'limit': 1,
+                                          'scrapeOptions': {'formats': ['markdown']}}))
+            if not isinstance(row.get('markdown'), str) or not row['markdown'].strip():
+                raise ValueError()
+
+        def scrape():
+            data = post('/v2/scrape', {'url': 'https://example.com', 'formats': ['markdown'], 'timeout': 60000})
+            if (not isinstance(data, dict) or not isinstance(data.get('markdown'), str)
+                    or not data['markdown'].strip() or (data.get('metadata') or {}).get('statusCode') != 200):
+                raise ValueError()
+
+        # v1 search is served by the 3003 compatibility proxy; check_extensions covers it after cutover.
+        for name, check in (('search_v2', search_v2), ('search_scrape', search_scrape), ('scrape', scrape)):
+            failure = name
+            for remaining in (2, 1, 0):
+                try:
+                    check()
+                    break
+                except Exception:
+                    if not remaining:
+                        raise
+                    time.sleep(10)
+            report['checks'][name] = 'passed'
+        failure = 'live_changed'
+        if live_identity() != before:
+            raise RuntimeError()
+        report['status'] = 'passed'
+        failure = None
+    except Exception:
+        # Container states only; never child output, environment or exception text.
+        report['failure'] = failure
+        try:
+            ids = project_containers(project)
+            rows = json.loads(run(['docker', 'inspect', *ids])) if ids else []
+            report['containers'] = [{'service': row['Config']['Labels'].get('com.docker.compose.service'),
+                                     'status': row['State']['Status'], 'exit_code': row['State']['ExitCode']}
+                                    for row in rows]
+        except Exception:
+            pass
+    finally:
+        report['teardown'] = 'clean' if teardown(project) else 'incomplete'
+        report['finished_at'] = dt.datetime.now(dt.timezone.utc).isoformat()
+        temp = evidence / 'trial.json.tmp'
+        temp.write_text(json.dumps(report, indent=2, sort_keys=True))
+        temp.replace(evidence / 'trial.json')
+    if failure:
+        raise SystemExit('candidate trial failed: ' + failure)
+    print('candidate trial passed: readiness, v2 search, search with scrape and scrape; live runtime unchanged')
+PYTRIAL
+}
+
+trial_teardown() {
+  [[ "$trial_project" != firecrawl ]] || return 0
+  docker compose --project-name "$trial_project" down --volumes --remove-orphans --timeout 10 >/dev/null 2>&1 || true
 }
 
 check_extensions() {
@@ -1402,6 +1653,7 @@ rollback() {
   local original_rc=${1:-$?} failed=0 rolled=0
   trap - ERR TERM INT
   set +e
+  [[ "$phase" != trial ]] || trial_teardown
   if [[ "$rollback_active" -eq 1 && -n "$previous_commit" ]]; then
     rolled=1
     log "update failed; restoring previous source and exact image preimage"
@@ -1444,6 +1696,11 @@ failure_notice() {
     precheck)
       gate notify "$state_dir" cutover_failed "$latest_tag" "$latest_commit" "${candidate_evidence:--}" \
         "${previous_tag:-$previous_commit}" "approved cutover stopped before any change; approval kept" ||
+        log "upgrade notice not delivered; retrying next run"
+      ;;
+    trial)
+      gate notify "$state_dir" cutover_failed "$latest_tag" "$latest_commit" "${candidate_evidence:--}" \
+        "${previous_tag:-$previous_commit}" "candidate trial failed on an isolated copy; live runtime unchanged; approval kept, retrying next scheduled run; inspect ${candidate_evidence:--}/trial.json" ||
         log "upgrade notice not delivered; retrying next run"
       ;;
     cutover)
@@ -1879,6 +2136,9 @@ auto_deploy_candidate() {
 }
 
 cutover_candidate() {
+  # The trial needs no exclusive lock: it never touches the live project.
+  phase=trial
+  trial_candidate
   phase=precheck
   # Do not interrupt an existing guarded read. Conversion may drop SH on failure;
   # run.lock remains held and we exit without changing live source or containers.
