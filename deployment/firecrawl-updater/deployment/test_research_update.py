@@ -2,6 +2,7 @@ import hashlib
 import ast
 import http.server
 import json
+import stat
 import os
 import re
 from pathlib import Path
@@ -437,6 +438,48 @@ main
                 source.write_bytes(source.read_bytes() + b'# next\n')
                 with self.assertRaisesRegex(ValueError, 'Unexpected unit source'):
                     owner.install(source, hashlib.sha256(target.read_bytes()).hexdigest(), guard, [stray])
+
+    def test_installer_rolls_back_to_the_exact_preimage_and_allows_reinstall(self):
+        from deployment import install_firecrawl_update as owner
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            lock = root / 'update.lock'; lock.touch(); lock.chmod(0o600)
+            target = root / 'firecrawl-upgrade'
+            guard = root / 'transport.py'; guard.write_bytes(b'# reviewed transport guard\n')
+            digest = hashlib.sha256(guard.read_bytes()).hexdigest()
+            old = ('#!/usr/bin/env bash\nguard_sha256=' + digest + '\n# old\n').encode()
+            new = ('#!/usr/bin/env bash\nguard_sha256=' + digest + '\n# new\n').encode()
+            target.write_bytes(old)
+            source = root / 'new.sh'; source.write_bytes(new)
+            sha = lambda data: hashlib.sha256(data).hexdigest()
+            with patch.object(owner, 'ROOT', root), patch.object(owner, 'TARGET', target), \
+                    patch.object(owner, 'install_restart_override'):
+                with self.assertRaisesRegex(ValueError, 'No completed installation receipt'):
+                    owner.rollback(sha(old))
+                self.assertEqual(owner.install(source, sha(old), guard)['status'], 'installed')
+                with self.assertRaisesRegex(ValueError, 'Installed updater changed'):
+                    owner.rollback(sha(old))
+                with self.assertRaisesRegex(ValueError, 'already attempted'):
+                    owner.install(source, sha(new), guard)
+                (root / 'guards' / (digest + '.py')).rename(root / 'guard.moved')
+                with self.assertRaisesRegex(ValueError, 'preimage transport guard is unavailable'):
+                    owner.rollback(sha(new))
+                (root / 'guard.moved').rename(root / 'guards' / (digest + '.py'))
+                self.assertEqual(target.read_bytes(), new)
+                result = owner.rollback(sha(new))
+                self.assertEqual(result, {'status': 'rolled_back', 'from_sha256': sha(new), 'to_sha256': sha(old)})
+                self.assertEqual(target.read_bytes(), old)
+                self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o700)
+                with self.assertRaisesRegex(ValueError, 'Installed updater changed'):
+                    owner.rollback(sha(new))
+                # The rolled-back version can be reinstalled; its first receipt is archived.
+                self.assertEqual(owner.install(source, sha(old), guard)['status'], 'installed')
+                self.assertEqual(target.read_bytes(), new)
+                archived = list(root.glob('research-repair-*.rolled-back-1.json'))
+                self.assertEqual(len(archived), 1)
+                self.assertEqual(json.loads(archived[0].read_text())['status'], 'rolled_back')
+                self.assertTrue(archived[0].with_name(archived[0].stem + '.before.sh').is_file())
+                self.assertEqual(owner.rollback(sha(new))['to_sha256'], sha(old))
 
     def test_installer_preserves_a_changed_updater_and_records_only_exact_replacement(self):
         from deployment import install_firecrawl_update as owner
