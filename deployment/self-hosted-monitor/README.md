@@ -48,8 +48,10 @@ Remove `--check-images` to install, or rerun with the same manifest to resume a
 partial installation. The install works without a Firecrawl core checkout or
 container and applies schemas and DB contracts only to the private Monitor DB.
 A failed readiness check stops the isolated API. Existing installations with a
-saved `BASE_API` can still build from their archived overlay sources. Use the
-existing upgrade owner when replacing images on an installed instance.
+saved `BASE_API` can still build from their archived overlay sources. To move an
+installed instance to another reviewed release, use
+[`extension_switch.py`](../README-extension-switch.md); storage image changes still
+need a dedicated upgrade owner.
 
 Private state is in `/home/marck/services/firecrawl-monitor/shared/`; never
 commit its `.env`, credentials, databases, page content or logs. Windows' client

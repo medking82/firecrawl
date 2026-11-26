@@ -14,6 +14,8 @@ IMAGE_KEYS = {
     'browser': {'BROWSER_API_IMAGE', 'BROWSER_IMAGE', 'POSTGRES_IMAGE', 'REDIS_IMAGE', 'RABBIT_IMAGE'},
     'monitor': {'MONITOR_IMAGE', 'POSTGRES_IMAGE', 'REDIS_IMAGE', 'RABBIT_IMAGE'},
 }
+STORAGE_KEYS = {'POSTGRES_IMAGE', 'REDIS_IMAGE', 'RABBIT_IMAGE'}
+SWITCH = False
 
 
 def load_release(manifest, source, service, required_files):
@@ -58,15 +60,19 @@ def select_release(source, envfile, service, filenames):
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument('--check-images', action='store_true', help='verify a release without installing it')
     modes.add_argument('--release-inputs', action='store_true', help='list the required manifest entries')
+    modes.add_argument('--switch', action='store_true',
+                       help='replace the application images of an installed extension (used by extension_switch.py)')
     args = parser.parse_args()
     if args.release_inputs:
         print(json.dumps({'service': service, 'image_keys': sorted(IMAGE_KEYS[service]),
                           'files': sorted(required_files)}))
         raise SystemExit(0)
     if args.release_images is None:
-        if args.check_images or not envfile.is_file():
-            parser.error('--release-images is required for first installation or --check-images')
+        if args.check_images or args.switch or not envfile.is_file():
+            parser.error('--release-images is required for first installation, --check-images or --switch')
         return None
+    if args.switch and not envfile.is_file():
+        parser.error('--switch requires an installed extension')
     try:
         release = load_release(args.release_images, source, service, required_files)
     except (OSError, ValueError, subprocess.TimeoutExpired) as error:
@@ -74,24 +80,30 @@ def select_release(source, envfile, service, filenames):
     if args.check_images:
         print(json.dumps(release, sort_keys=True))
         raise SystemExit(0)
+    global SWITCH
+    SWITCH = args.switch
     return release
 
 
-def install_images(release, config):
+def install_images(release, config, switch=None):
     if release is None:
         if 'BASE_API' not in config:
             raise ValueError('supply the installed extension release with --release-images')
         return config
     images = release['images']
-    if config and any(config.get(name) != image for name, image in images.items()):
+    changed = {name for name, image in images.items() if config and config.get(name) != image}
+    if changed and not (SWITCH if switch is None else switch):
         raise ValueError('release images differ from the installed extension; use its upgrade owner')
+    if changed & STORAGE_KEYS:
+        raise ValueError('storage images differ from the installed extension; use its upgrade owner')
     return {**config, **images}
 
 
-def verify_project_images(release, project):
+def verify_project_images(release, project, switch=None):
     api_key = 'BROWSER_API_IMAGE' if release['service'] == 'browser' else 'MONITOR_IMAGE'
     image_keys = {'api': api_key, 'app-db': 'POSTGRES_IMAGE',
                   'redis': 'REDIS_IMAGE', 'rabbitmq': 'RABBIT_IMAGE'}
+    switching = SWITCH if switch is None else switch
     containers = subprocess.check_output(
         ['docker', 'ps', '-aq', '--filter', 'label=com.docker.compose.project=' + project],
         text=True, timeout=10).splitlines()
@@ -102,6 +114,8 @@ def verify_project_images(release, project):
     for row in rows:
         service = row['Config']['Labels'].get('com.docker.compose.service')
         key = image_keys.get(service)
+        if switching and key is not None and key not in STORAGE_KEYS:
+            continue
         if key is None or row['Image'] != release['images'][key]:
             raise ValueError('running extension differs from the release; use its upgrade owner')
 
