@@ -6,7 +6,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_PASSWORD: ${APP_DB_PASSWORD:?set a private password}
-      POSTGRES_DB: monitor
+      POSTGRES_DB: ${POSTGRES_INIT_DB:-monitor}
     volumes:
       - app-db:/var/lib/postgresql/data
     healthcheck:

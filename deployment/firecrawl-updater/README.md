@@ -87,7 +87,7 @@ of that refresh is reported separately and does not roll back the core.
 
 After the core passes its own smoke checks, the updater also checks port `3003`
 for v1 and v2 search, search with Markdown extraction, standalone scraping,
-and authenticated Browser and Monitor list responses. It writes only outcome
+and authenticated Browser, Interact and Monitor list responses. It writes only outcome
 codes to `extensions.json` in that candidate's evidence directory. A degraded
 extension check goes to the systemd journal and does not roll back an admitted
 core. Run `firecrawl-upgrade --check-extensions` to repeat the check without

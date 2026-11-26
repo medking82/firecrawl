@@ -26,6 +26,7 @@ class ResearchUpdaterTests(unittest.TestCase):
             '/v2/search': {'data': {'web': [{'markdown': '# Example'}]}},
             '/v2/scrape': {'data': {'markdown': '# Example', 'metadata': {'statusCode': 200}}},
             '/v2/browser': {'sessions': [{'id': 'private-session'}]},
+            '/v2/interact': {'sessions': []},
             '/v2/monitor': {'data': [{'id': 'private-monitor'}]},
         }
 

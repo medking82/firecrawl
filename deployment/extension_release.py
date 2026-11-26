@@ -114,3 +114,12 @@ def lock_installation(state):
         os.close(lock)
         raise
     return lock
+
+
+def ensure_app_database(compose, database):
+    exists = compose('exec', '-T', 'app-db', 'psql', '-XAt', '-U', 'postgres', '-d', 'postgres',
+                     '-v', 'ON_ERROR_STOP=1', '-c',
+                     f"SELECT 1 FROM pg_database WHERE datname = '{database}'", capture_output=True)
+    if not exists.stdout.strip():
+        compose('exec', '-T', 'app-db', 'psql', '-X', '-U', 'postgres', '-d', 'postgres',
+                '-v', 'ON_ERROR_STOP=1', '-c', f'CREATE DATABASE {database} TEMPLATE template0')
