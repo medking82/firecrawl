@@ -1,8 +1,9 @@
 # Isolated Self-Hosted Monitor
 
-This overlay runs Firecrawl **v2.11.621 / 33f295dc** native monitor controllers,
-scheduler, RabbitMQ consumers, scrape workers, diff calculation and lifecycle API.
-It does not switch the existing Firecrawl deployment to DB authentication.
+This isolated API runs the native monitor controllers, scheduler, RabbitMQ
+consumers, scrape workers, diff calculation and lifecycle API. Its release
+selects the images and queue schema. Monitor database authentication is local
+to the Monitor project.
 
 ## Deployment Boundary
 
@@ -37,15 +38,18 @@ It does not switch the existing Firecrawl deployment to DB authentication.
 
 ## Install And Validate
 
-Package this directory, `apps/nuq-postgres/nuq.sql`, and the six source files
-listed by `compile.cjs`, preserving their repository-relative paths in a new
-immutable `/home/marck/services/firecrawl-monitor/releases/<content-id>` directory.
-On GA401 run `python3 -B deployment/self-hosted-monitor/deploy.py` from that
-release. It pins existing cached image IDs, builds an offline overlay, applies
-the queue/application schemas, runs DB contracts on first install, seeds a
-private local credential, and starts the independent stack. It checks production
-configuration hashes and container start timestamps. A failed monitor readiness
-check stops only the isolated API.
+On first install, use `python3 -B deployment/self-hosted-monitor/deploy.py
+--release-inputs` to list the required package files and images. Use the
+[Browser release manifest format](../self-hosted-browser/README.md#deployment-and-validation)
+with `service` set to `monitor`, and load the reviewed Monitor API, PostgreSQL,
+Redis and RabbitMQ images. Run `python3 -B deployment/self-hosted-monitor/deploy.py
+--release-images release-images.json --check-images` from the packaged release.
+Remove `--check-images` to install, or rerun with the same manifest to resume a
+partial installation. The install works without a Firecrawl core checkout or
+container and applies schemas and DB contracts only to the private Monitor DB.
+A failed readiness check stops the isolated API. Existing installations with a
+saved `BASE_API` can still build from their archived overlay sources. Use the
+existing upgrade owner when replacing images on an installed instance.
 
 Private state is in `/home/marck/services/firecrawl-monitor/shared/`; never
 commit its `.env`, credentials, databases, page content or logs. Windows' client
