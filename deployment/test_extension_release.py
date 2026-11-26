@@ -43,7 +43,7 @@ elif args[0] == "ps":
     if os.environ.get("LIVE_IMAGE") and "-aq" in args:
         print("extension-api")
 elif args[:2] == ["container", "inspect"]:
-    print(json.dumps([{"Image": os.environ["LIVE_IMAGE"],
+    print(json.dumps([{"Image": os.environ["LIVE_IMAGE"], "State": {"Running": True},
                         "Config": {"Labels": {"com.docker.compose.service": "api"}}}]))
 elif args[0] == "compose":
     if any(name in os.environ for name in ("BROWSER_API_IMAGE", "MONITOR_IMAGE")):
@@ -187,6 +187,50 @@ else:
                 extension_switch.switch(ext, self.source, ext.state / 'switches/first')
         self.assertFalse((ext.state / 'switches').exists())
         self.assertFalse(any(command[0] in ('compose', 'ps') for command in self.calls()))
+
+    def test_switch_owner_keeps_security_refreshed_api_images(self):
+        release = self.manifest('monitor')
+        (self.source / 'release-images.json').write_text(json.dumps(release))
+        ext = extension_switch.Extension('monitor', home=self.home)
+        ext.state.mkdir(parents=True)
+        ext.envfile.write_text(''.join(f'{key}={image}\n' for key, image in
+                                       {**release['images'], 'MONITOR_IMAGE': 'sha256:' + 'e' * 64}.items()))
+        refreshed = {'PATH': self.env['PATH'], 'HOME': str(self.home), 'LIVE_IMAGE': 'sha256:' + 'b' * 64}
+        with mock.patch.dict(os.environ, refreshed):
+            with self.assertRaisesRegex(RuntimeError, 'security refresh'):
+                extension_switch.switch(ext, self.source, ext.state / 'switches/first')
+        self.assertFalse((ext.state / 'switches').exists())
+        self.assertFalse(any(command[0] == 'compose' for command in self.calls()))
+
+    def test_unit_settings_include_drop_ins_and_report_losses(self):
+        ext = extension_switch.Extension('monitor', home=self.home)
+        ext.units.mkdir(parents=True)
+        unit = ext.units / 'firecrawl-monitor-judge.service'
+        unit.write_text('[Unit]\nDescription=judge\nAfter=network-online.target\n[Service]\n'
+                        'ExecStart=/usr/bin/python3 old.py\nEnvironment=MAGPIE_JUDGE_MODEL=group A=1\n')
+        snapshot = {'units': {unit.name: {'settings': sorted(extension_switch.unit_settings(unit))}}}
+        self.assertIn('Environment MAGPIE_JUDGE_MODEL', snapshot['units'][unit.name]['settings'])
+        unit.write_text('[Unit]\nDescription=judge\n[Service]\nExecStart=/usr/bin/python3 new.py\n'
+                        'Environment=A=2\n')
+        self.assertEqual(extension_switch.lost_unit_settings(ext, snapshot),
+                         [f'{unit.name}: After=network-online.target',
+                          f'{unit.name}: Environment MAGPIE_JUDGE_MODEL'])
+        dropin = ext.units / (unit.name + '.d')
+        dropin.mkdir()
+        (dropin / 'operator.conf').write_text('[Unit]\nAfter=network-online.target\n[Service]\n'
+                                              'Environment=MAGPIE_JUDGE_MODEL=group\n')
+        self.assertEqual(extension_switch.lost_unit_settings(ext, snapshot), [])
+
+    def test_switch_waits_for_a_running_security_refresh(self):
+        ext = extension_switch.Extension('browser', home=self.home)
+        self.assertIsNone(extension_switch.lock_security_refresh(ext))
+        (self.home / extension_switch.SECURITY_REFRESH).parent.mkdir(parents=True)
+        held = extension_switch.lock_security_refresh(ext)
+        try:
+            with self.assertRaisesRegex(RuntimeError, 'security refresh is running'):
+                extension_switch.lock_security_refresh(ext)
+        finally:
+            os.close(held)
 
     def test_retry_rejects_newer_running_image_before_compose(self):
         release = self.manifest('monitor')
