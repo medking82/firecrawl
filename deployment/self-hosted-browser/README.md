@@ -123,8 +123,10 @@ to install, or rerun with the same manifest to resume a partial installation.
 The installer uses the reviewed images without a core checkout, core image,
 registry pull or local build. It applies SQL to the isolated DB and compares the
 production services it found before the install. It rejects unowned projects
-and image changes to existing installations. Use the existing upgrade owner
-for a cutover. Existing installations with a saved `BASE_API` can still use
+and image changes to existing installations. Switch an installed instance to
+another reviewed release with [`extension_switch.py`](../README-extension-switch.md);
+storage image changes still need a dedicated upgrade owner. Existing installations
+with a saved `BASE_API` can still use
 their archived source overlay build procedure.
 
 `smoke.py` exercises real API sessions, public navigation, persistent DOM, failures,

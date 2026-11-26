@@ -9,6 +9,9 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 
+from unittest import mock
+
+from deployment import extension_switch
 from deployment.extension_release import ensure_app_database, install_images, lock_installation
 
 
@@ -140,6 +143,50 @@ else:
         self.assertEqual(install_images(release, release['images']), release['images'])
         legacy = {'BASE_API': 'sha256:' + 'a' * 64}
         self.assertEqual(install_images(None, legacy), legacy)
+
+    def test_switch_replaces_application_images_but_never_storage(self):
+        release = self.manifest('browser')
+        installed = {**release['images'], 'BROWSER_API_IMAGE': 'sha256:' + 'e' * 64,
+                     'BROWSER_IMAGE': 'sha256:' + 'd' * 64, 'APP_DB_PASSWORD': 'kept'}
+        self.assertEqual(install_images(release, installed, switch=True),
+                         {**installed, **release['images']})
+        with self.assertRaisesRegex(ValueError, 'storage images differ'):
+            install_images(release, {**installed, 'POSTGRES_IMAGE': 'sha256:' + 'c' * 64}, switch=True)
+
+    def test_switch_installer_updates_the_api_pin_and_rejects_storage_changes(self):
+        release = self.manifest('monitor')
+        path = self.write_manifest(release)
+        runtime = self.home / 'services/firecrawl-monitor/shared/runtime.env'
+        runtime.parent.mkdir(parents=True)
+        previous = 'sha256:' + 'e' * 64
+        runtime.write_text(''.join(f'{key}={image}\n' for key, image in
+                                   {**release['images'], 'MONITOR_IMAGE': previous}.items()))
+        result = self.deploy('monitor', '--release-images', path)
+        self.assertIn('use its upgrade owner', result.stderr)
+        result = self.deploy('monitor', '--release-images', path, '--switch',
+                             env={**self.env, 'LIVE_IMAGE': previous})
+        self.assertIn('exit status 73', result.stderr)
+        self.assertIn('MONITOR_IMAGE=' + release['images']['MONITOR_IMAGE'], runtime.read_text().splitlines())
+        storage = runtime.read_text().replace(release['images']['REDIS_IMAGE'], 'sha256:' + 'c' * 64)
+        runtime.write_text(storage)
+        (self.home / 'docker.calls').unlink()
+        result = self.deploy('monitor', '--release-images', path, '--switch')
+        self.assertIn('storage images differ', result.stderr)
+        self.assertFalse(any(command[0] == 'compose' for command in self.calls()))
+        self.assertEqual(runtime.read_text(), storage)
+
+    def test_switch_owner_refuses_storage_changes_before_touching_the_extension(self):
+        release = self.manifest('monitor')
+        (self.source / 'release-images.json').write_text(json.dumps(release))
+        ext = extension_switch.Extension('monitor', home=self.home)
+        ext.state.mkdir(parents=True)
+        ext.envfile.write_text(''.join(f'{key}={image}\n' for key, image in
+                                       {**release['images'], 'RABBIT_IMAGE': 'sha256:' + 'c' * 64}.items()))
+        with mock.patch.dict(os.environ, {'PATH': self.env['PATH'], 'HOME': str(self.home)}):
+            with self.assertRaisesRegex(RuntimeError, 'changes storage images'):
+                extension_switch.switch(ext, self.source, ext.state / 'switches/first')
+        self.assertFalse((ext.state / 'switches').exists())
+        self.assertFalse(any(command[0] in ('compose', 'ps') for command in self.calls()))
 
     def test_retry_rejects_newer_running_image_before_compose(self):
         release = self.manifest('monitor')

@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'deployment/extension_release.py'
+      - 'deployment/extension_switch.py'
+      - 'deployment/README-extension-switch.md'
       - 'deployment/test_extension_release.py'
       - 'deployment/self-hosted-browser/**'
       - 'deployment/self-hosted-monitor/**'
@@ -12,6 +14,8 @@ on:
     branches: [main]
     paths:
       - 'deployment/extension_release.py'
+      - 'deployment/extension_switch.py'
+      - 'deployment/README-extension-switch.md'
       - 'deployment/test_extension_release.py'
       - 'deployment/self-hosted-browser/**'
       - 'deployment/self-hosted-monitor/**'
