@@ -478,6 +478,7 @@ probes = (
         'query': 'example domain IANA', 'limit': 2, 'scrapeOptions': {'formats': ['markdown']}}),
     ('scrape', '/v2/scrape', {'url': 'https://example.com', 'formats': ['markdown'], 'timeout': 20000}),
     ('browser', '/v2/browser', None),
+    ('interact', '/v2/interact', None),
     ('monitor', '/v2/monitor', None),
 )
 
@@ -486,7 +487,7 @@ def valid(name, response):
     if not isinstance(response, dict) or response.get('success') is not True:
         return False
     data = response.get('data')
-    if name == 'browser':
+    if name in ('browser', 'interact'):
         return isinstance(response.get('sessions'), list)
     if name == 'monitor':
         return isinstance(data, list)

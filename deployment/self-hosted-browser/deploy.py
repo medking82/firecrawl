@@ -5,7 +5,7 @@ from pathlib import Path
 HERE=Path(__file__).resolve().parent
 SOURCE=HERE.parents[1]
 sys.path.insert(0, str(SOURCE / 'deployment'))
-from extension_release import install_images, lock_installation, select_release, verify_project_images
+from extension_release import ensure_app_database, install_images, lock_installation, select_release, verify_project_images
 
 ROOT=Path.home()/'services/firecrawl-browser'
 STATE=ROOT/'shared'
@@ -44,6 +44,7 @@ before=snapshot();private(STATE/'before.json',json.dumps(before,indent=2))
 if not ENVFILE.exists():
     if output(['docker','ps','-aq','--filter','label=com.docker.compose.project='+PROJECT]):raise RuntimeError('unowned_browser_project')
     config = install_images(release, {})
+    config['POSTGRES_INIT_DB'] = 'postgres'
     config['APP_DB_PASSWORD']=secrets.token_hex(32)
 else:
     saved = dict(line.split('=',1) for line in ENVFILE.read_text().splitlines() if '=' in line)
@@ -71,9 +72,11 @@ private(ENVFILE,'\n'.join(k+'='+v for k,v in config.items())+'\n')
 compose_env = {key: value for key, value in os.environ.items() if key not in config}
 compose('up','--no-build','--pull','never','-d','app-db','redis','rabbitmq')
 for _ in range(40):
-    if subprocess.run(['docker','exec','firecrawl-browser-app-db-1','pg_isready','-U','postgres','-d','browser'],capture_output=True).returncode==0:break
+    if subprocess.run(['docker','exec','firecrawl-browser-app-db-1','pg_isready','-h','127.0.0.1','-U','postgres','-d','postgres'],capture_output=True).returncode==0:break
     time.sleep(1)
 else:raise RuntimeError('browser_db_not_ready')
+if config.get('POSTGRES_INIT_DB') == 'postgres':
+    ensure_app_database(compose, 'browser')
 queue_schema = SOURCE / ('nuq.sql' if release else 'apps/nuq-postgres/nuq.sql')
 psql(queue_schema.read_text(),'postgres')
 psql((SOURCE/'deployment/self-hosted-monitor/001-monitor.sql').read_text())

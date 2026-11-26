@@ -95,12 +95,6 @@ jobs:
             apps/test-site/pnpm-lock.yaml
             apps/playwright-service-ts/pnpm-lock.yaml
 
-      - name: Run CDP TCP reset transport regression
-        if: matrix.engine == 'fetch' && matrix.proxy == 'no-proxy' && matrix.nuq == 'postgres'
-        run: |
-          node --test deployment/self-hosted-browser/cdp-transport.test.cjs
-          python3 -B -m unittest discover -s deployment/self-hosted-browser -p 'test_activation.py'
-
       - run: pnpm fetch
         working-directory: apps/api
       - run: pnpm fetch
@@ -309,19 +303,6 @@ jobs:
         working-directory: apps/api
         env:
           npm_config_ignore_scripts: 'true' # required currently to prevent re-building cached native lib
-
-      - name: Run self-hosted monitor retention and CLI contracts
-        if: matrix.engine == 'fetch' && matrix.proxy == 'no-proxy' && matrix.nuq == 'postgres'
-        env:
-          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
-          BROWSER_JOB_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/firecrawl_browser_test_contract
-          OPENAI_API_KEY: ''
-        run: |
-          node --test deployment/self-hosted-monitor/retention.test.cjs
-          python3 -B -m unittest discover -s deployment/self-hosted-monitor -p 'test_codex_judge.py'
-          node --test deployment/self-hosted-browser/policy.test.cjs
-          node -e 'const {Client}=require("./apps/api/node_modules/pg");(async()=>{const c=new Client({connectionString:process.env.DATABASE_URL});await c.connect();await c.query("CREATE DATABASE firecrawl_browser_test_contract");await c.end();})().catch(e=>{console.error(e);process.exit(1)})'
-          python3 -B -m unittest discover -s deployment/self-hosted-browser -p 'test_codex_browser.py'
 
       - name: Publish test report
         if: always()

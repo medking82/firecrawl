@@ -6,9 +6,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 
-from deployment.extension_release import install_images, lock_installation
+from deployment.extension_release import ensure_app_database, install_images, lock_installation
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -110,6 +111,7 @@ else:
                 self.assertFalse(any(command[0] in ('inspect', 'build', 'tag') for command in calls))
                 runtime = self.home / f'services/firecrawl-{service}/shared/runtime.env'
                 self.assertIn(image_key + '=' + release['images'][image_key], runtime.read_text().splitlines())
+                self.assertIn('POSTGRES_INIT_DB=postgres', runtime.read_text().splitlines())
 
     def test_manifest_is_required_before_docker_for_a_fresh_install(self):
         result = self.deploy('browser')
@@ -161,3 +163,15 @@ else:
         finally:
             os.close(lock)
         os.close(lock_installation(self.home))
+
+    def test_app_database_starts_from_clean_template_and_is_retained_on_retry(self):
+        for output in ('', '1\n'):
+            calls = []
+
+            def compose(*args, **kwargs):
+                calls.append(args[-1])
+                return SimpleNamespace(stdout=output)
+
+            ensure_app_database(compose, 'browser')
+            self.assertEqual(calls, ["SELECT 1 FROM pg_database WHERE datname = 'browser'"]
+                             + ([] if output else ['CREATE DATABASE browser TEMPLATE template0']))

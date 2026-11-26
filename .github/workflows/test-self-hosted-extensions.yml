@@ -1,0 +1,38 @@
+name: Self-hosted extensions
+
+on:
+  pull_request:
+    paths:
+      - 'deployment/extension_release.py'
+      - 'deployment/test_extension_release.py'
+      - 'deployment/self-hosted-browser/**'
+      - 'deployment/self-hosted-monitor/**'
+      - '.github/workflows/test-self-hosted-extensions.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'deployment/extension_release.py'
+      - 'deployment/test_extension_release.py'
+      - 'deployment/self-hosted-browser/**'
+      - 'deployment/self-hosted-monitor/**'
+      - '.github/workflows/test-self-hosted-extensions.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  extension-contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+      - run: |
+          python3 -B -m unittest deployment.test_extension_release
+          python3 -B -m unittest discover -s deployment/self-hosted-browser -p test_activation.py
+          python3 -B -m unittest discover -s deployment/self-hosted-monitor -p test_codex_judge.py
+          node --test deployment/self-hosted-browser/policy.test.cjs deployment/self-hosted-browser/cdp-transport.test.cjs
