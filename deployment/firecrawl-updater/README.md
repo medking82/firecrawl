@@ -67,8 +67,10 @@ user manager has lingering enabled so logout does not stop the timer.
    so the trial points `SEARXNG_ENDPOINT` at a local fixture that returns
    `https://example.com/`. Readiness, `/v2/search`, `/v2/search` with
    `scrapeOptions` Markdown and `/v2/scrape` must pass, and the live `firecrawl`
-   containers must be unchanged. The trial is always removed (`down --volumes`),
-   also on TERM/INT. A failure writes container states to `trial.json` in the
+   containers must be unchanged. If the trial API exits, readiness fails on the
+   next poll. The trial cleans up on completion and on TERM/INT. Before cutover,
+   the updater verifies no trial containers, networks or volumes remain.
+   A failure writes container states to `trial.json` in the
    candidate evidence, notifies, keeps the authorization and retries at the next
    scheduled run without touching the live runtime. `/v1/search` is served by the
    3003 compatibility proxy and is checked after cutover by `check_extensions`.

@@ -452,10 +452,15 @@ print('Firecrawl transport, search and scrape smoke passed')
 PYSMOKE
 }
 
+valid_trial_project() {
+  [[ "$trial_project" =~ ^firecrawl-trial[a-z0-9-]{0,20}$ ]]
+}
+
 # Run the admitted candidate as a separate Compose project with its own queue,
 # database, Redis, RabbitMQ and browser services before the live cutover. The
 # live project is never touched; a failure leaves the approval for the next run.
 trial_candidate() {
+  valid_trial_project || { log "invalid candidate trial project"; return 1; }
   log "trial: starting $latest_tag as $trial_project on 127.0.0.1:$trial_port"
   python3 -B - "$repo" "$candidate_dir" "$candidate_evidence" "$trial_port" "$trial_project" <<'PYTRIAL'
 import datetime as dt
@@ -491,10 +496,14 @@ http.createServer((request, response) => {
 """
 
 
+def validate_trial_project(project):
+    if not re.fullmatch(r'firecrawl-trial[a-z0-9-]{0,20}', project):
+        raise ValueError('trial_project_name')
+
+
 def trial_config(config, images, port, project):
     """Turn the rendered candidate Compose config into an isolated trial project."""
-    if project == 'firecrawl' or not re.fullmatch(r'firecrawl-trial[a-z0-9-]{0,20}', project):
-        raise ValueError('trial_project_name')
+    validate_trial_project(project)
     services, networks, volumes = {}, set(), set()
     for name, service in config['services'].items():
         if name in SEARCH_SERVICES:
@@ -578,18 +587,50 @@ def project_containers(project):
     return run(['docker', 'ps', '-aq', '--filter', 'label=com.docker.compose.project=' + project]).split()
 
 
-def teardown(project):
-    subprocess.run(['docker', 'compose', '--project-name', project, 'down', '--volumes', '--remove-orphans',
-                    '--timeout', '10'], capture_output=True, timeout=300)
-    return not project_containers(project)
+def wait_for_trial_api(project, opener, endpoint):
+    deadline = time.monotonic() + 240
+    while True:
+        states = run(['docker', 'ps', '-a', '--filter', 'label=com.docker.compose.project=' + project,
+                      '--filter', 'label=com.docker.compose.service=api',
+                      '--filter', 'label=com.docker.compose.oneoff=False',
+                      '--format', '{{.State}}'], timeout=10).split()
+        if len(states) != 1:
+            return 'trial_api_container_count'
+        if states[0] in ('exited', 'dead'):
+            return 'trial_api_exited'
+        try:
+            with opener.open(endpoint + '/health/readiness', timeout=5) as response:
+                if response.status == 200:
+                    return None
+        except OSError:
+            pass
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return 'readiness'
+        time.sleep(min(3, remaining))
+
+
+def teardown(project, definition, evidence):
+    validate_trial_project(project)
+    label = 'label=com.docker.compose.project=' + project
+    try:
+        run(['docker', 'compose', '--project-name', project, '-f', '-', 'down', '--volumes', '--remove-orphans',
+             '--timeout', '10'], timeout=300, input=json.dumps(definition), cwd=str(evidence))
+        return not (project_containers(project)
+                    or run(['docker', 'network', 'ls', '-q', '--filter', label], timeout=10).strip()
+                    or run(['docker', 'volume', 'ls', '-q', '--filter', label], timeout=10).strip())
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 if __name__ == '__main__':
     repo, source, evidence, port, project = sys.argv[1:6]
+    validate_trial_project(project)
     port, evidence = int(port), Path(evidence)
     report = {'schema': 1, 'status': 'failed', 'project': project, 'port': port,
               'started_at': dt.datetime.now(dt.timezone.utc).isoformat(), 'checks': {}}
     failure = 'trial_setup'
+    definition = None
     try:
         images = json.loads((evidence / 'images.json').read_text())['services']
         report['api_image'] = images['api']['image']
@@ -599,7 +640,7 @@ if __name__ == '__main__':
         definition = trial_config(json.loads(run([*compose, 'config', '--format', 'json'])), images, port, project)
         report['services'] = sorted(definition['services'])
         failure = 'trial_leftover'
-        if not teardown(project):
+        if not teardown(project, definition, evidence):
             raise RuntimeError()
         failure = 'trial_port_busy'
         with socket.socket() as probe:
@@ -613,17 +654,10 @@ if __name__ == '__main__':
         endpoint = 'http://127.0.0.1:' + str(port)
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         failure = 'readiness'
-        deadline = time.monotonic() + 240
-        while True:
-            try:
-                with opener.open(endpoint + '/health/readiness', timeout=5) as response:
-                    if response.status == 200:
-                        break
-            except (OSError, urllib.error.URLError):
-                pass
-            if time.monotonic() > deadline:
-                raise RuntimeError()
-            time.sleep(3)
+        readiness_failure = wait_for_trial_api(project, opener, endpoint)
+        if readiness_failure:
+            failure = readiness_failure
+            raise RuntimeError()
         report['checks']['readiness'] = 'passed'
 
         def post(route, body):
@@ -685,7 +719,13 @@ if __name__ == '__main__':
         except Exception:
             pass
     finally:
-        report['teardown'] = 'clean' if teardown(project) else 'incomplete'
+        report['teardown'] = 'not_started'
+        if definition is not None:
+            clean = teardown(project, definition, evidence)
+            report['teardown'] = 'clean' if clean else 'incomplete'
+            if not clean and failure is None:
+                failure = 'trial_teardown'
+                report.update(status='failed', failure=failure)
         report['finished_at'] = dt.datetime.now(dt.timezone.utc).isoformat()
         temp = evidence / 'trial.json.tmp'
         temp.write_text(json.dumps(report, indent=2, sort_keys=True))
@@ -697,7 +737,7 @@ PYTRIAL
 }
 
 trial_teardown() {
-  [[ "$trial_project" != firecrawl ]] || return 0
+  valid_trial_project || return 0
   docker compose --project-name "$trial_project" down --volumes --remove-orphans --timeout 10 >/dev/null 2>&1 || true
 }
 

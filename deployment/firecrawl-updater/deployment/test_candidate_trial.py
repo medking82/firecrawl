@@ -4,13 +4,16 @@ import json
 from pathlib import Path
 import subprocess
 import unittest
+from unittest.mock import Mock, patch
 
 SOURCE = Path(__file__).with_name('firecrawl_update.sh')
 TEXT = SOURCE.read_text()
-BODY = TEXT.split('# BEGIN TRIAL CONFIG\n', 1)[1].split('# END TRIAL CONFIG', 1)[0]
-NAMESPACE = {}
-exec(compile('import json, re, secrets\n' + BODY, 'trial_config', 'exec'), NAMESPACE)
+BODY = TEXT.split("<<'PYTRIAL'\n", 1)[1].split('\nPYTRIAL\n', 1)[0]
+NAMESPACE = {'__name__': 'candidate_trial'}
+exec(compile(BODY, 'candidate_trial', 'exec'), NAMESPACE)
 trial_config = NAMESPACE['trial_config']
+wait_for_trial_api = NAMESPACE['wait_for_trial_api']
+teardown = NAMESPACE['teardown']
 
 IMAGE = 'sha256:' + 'a' * 64
 LIVE = {
@@ -115,6 +118,54 @@ class CandidateTrialConfigTests(unittest.TestCase):
             change(config)
             with self.subTest(error=error), self.assertRaisesRegex(ValueError, error):
                 trial_config(config, IMAGES, 3012, 'firecrawl-trial')
+
+    def test_readiness_stops_when_trial_api_exits(self):
+        for state in ('exited', 'dead'):
+            with self.subTest(state=state):
+                opener = Mock()
+                docker = Mock(return_value=state + '\n')
+                with patch.dict(NAMESPACE, run=docker), patch('time.sleep') as sleep:
+                    self.assertEqual(wait_for_trial_api('firecrawl-trial', opener, 'http://127.0.0.1:3012'),
+                                     'trial_api_exited')
+                opener.open.assert_not_called()
+                sleep.assert_not_called()
+                docker.assert_called_once_with(
+                    ['docker', 'ps', '-a', '--filter', 'label=com.docker.compose.project=firecrawl-trial',
+                     '--filter', 'label=com.docker.compose.service=api',
+                     '--filter', 'label=com.docker.compose.oneoff=False', '--format', '{{.State}}'], timeout=10)
+
+    def test_slow_api_can_become_ready(self):
+        opener = Mock()
+        opener.open.side_effect = [ConnectionRefusedError(), opener.open.return_value]
+        opener.open.return_value.__enter__ = Mock(return_value=Mock(status=200))
+        opener.open.return_value.__exit__ = Mock(return_value=False)
+        with patch.dict(NAMESPACE, run=Mock(return_value='running\n')), patch('time.sleep') as sleep:
+            self.assertIsNone(wait_for_trial_api('firecrawl-trial', opener, 'http://127.0.0.1:3012'))
+        self.assertEqual(opener.open.call_count, 2)
+        sleep.assert_called_once()
+
+    def test_readiness_rejects_missing_or_ambiguous_api(self):
+        for states in ('', 'running\nexited\n'):
+            with self.subTest(states=states), patch.dict(NAMESPACE, run=Mock(return_value=states)):
+                opener = Mock()
+                self.assertEqual(wait_for_trial_api('firecrawl-trial', opener, 'http://127.0.0.1:3012'),
+                                 'trial_api_container_count')
+                opener.open.assert_not_called()
+
+    def test_teardown_refuses_production_and_unrelated_projects(self):
+        with patch.dict(NAMESPACE, run=Mock()) as namespace:
+            for project in ('firecrawl', 'other', 'firecrawl-trial_x'):
+                with self.subTest(project=project), self.assertRaisesRegex(ValueError, 'trial_project_name'):
+                    teardown(project, {}, Path('/trial'))
+            namespace['run'].assert_not_called()
+
+    def test_teardown_checks_for_lingering_compose_resources(self):
+        for outputs, clean in ((('', '', '', ''), True), (('', 'container-id'), False),
+                               (('', '', 'network-id'), False), (('', '', '', 'volume-id'), False)):
+            with self.subTest(outputs=outputs), patch.dict(NAMESPACE, run=Mock(side_effect=outputs)):
+                self.assertEqual(teardown('firecrawl-trial', {}, Path('/trial')), clean)
+        with patch.dict(NAMESPACE, run=Mock(side_effect=subprocess.TimeoutExpired('docker', 300))):
+            self.assertFalse(teardown('firecrawl-trial', {}, Path('/trial')))
 
     def test_trial_runs_before_any_live_change_and_cleans_up_on_failure(self):
         cutover = TEXT.split('\ncutover_candidate() {\n', 1)[1].split('\n}\n', 1)[0]
