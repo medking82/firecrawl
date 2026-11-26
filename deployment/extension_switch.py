@@ -28,6 +28,8 @@ UNITS = {
 }
 PORT = {'browser': 3007, 'monitor': 3006}
 API_KEY = {'browser': 'BROWSER_API_IMAGE', 'monitor': 'MONITOR_IMAGE'}
+SECURITY_REFRESH = Path('.local/state/firecrawl-security-refresh/owner.lock')
+IGNORED_DIRECTIVES = {'Description', 'ExecStart'}
 
 
 class Extension:
@@ -94,6 +96,46 @@ def private_copy(source, target):
     target.chmod(0o600)
 
 
+def unit_settings(path):
+    settings = set()
+    for source in [path, *sorted(Path(str(path) + '.d').glob('*.conf'))]:
+        if not source.is_file():
+            continue
+        for line in source.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith(('#', ';', '[')) or '=' not in line:
+                continue
+            key, value = (part.strip() for part in line.split('=', 1))
+            if key in IGNORED_DIRECTIVES:
+                continue
+            if key == 'Environment':
+                settings.update('Environment ' + pair.split('=', 1)[0] for pair in value.split())
+            else:
+                settings.add(f'{key}={value}')
+    return settings
+
+
+def lost_unit_settings(ext, snapshot):
+    lost = []
+    for name, unit in snapshot['units'].items():
+        missing = set(unit['settings']) - unit_settings(ext.units / name)
+        lost += [f'{name}: {setting}' for setting in sorted(missing)]
+    return lost
+
+
+def lock_security_refresh(ext):
+    path = ext.home / SECURITY_REFRESH
+    if not path.parent.is_dir():
+        return None
+    descriptor = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(descriptor)
+        raise RuntimeError('a Firecrawl security refresh is running; retry after it finishes')
+    return descriptor
+
+
 def take_snapshot(ext, directory):
     directory.mkdir(parents=True, mode=0o700)
     private_copy(ext.envfile, directory / 'runtime.env')
@@ -108,7 +150,7 @@ def take_snapshot(ext, directory):
         if path.is_file():
             private_copy(path, directory / name)
         active = systemctl('is-active', name, check=False).stdout.strip() == 'active'
-        units[name] = {'present': path.is_file(), 'active': active}
+        units[name] = {'present': path.is_file(), 'active': active, 'settings': sorted(unit_settings(path))}
     snapshot = {
         'service': ext.service,
         'api_image': api['Image'],
@@ -171,7 +213,7 @@ def restore(ext, directory):
     return '; '.join(problems + ([problem] if problem else [])) or None
 
 
-def switch(ext, release_dir, directory):
+def switch(ext, release_dir, directory, replace_refreshed=False):
     script = release_dir / f'deployment/self-hosted-{ext.service}/deploy.py'
     manifest = release_dir / 'release-images.json'
     inputs = json.loads(subprocess.check_output([sys.executable, '-B', str(script), '--release-inputs'],
@@ -181,14 +223,21 @@ def switch(ext, release_dir, directory):
     changed = {key for key in IMAGE_KEYS[ext.service] if current.get(key) != release['images'][key]}
     if changed & STORAGE_KEYS:
         raise RuntimeError('target release changes storage images; use the extension upgrade owner')
+    live = ext.api_image()
+    target = release['images'][API_KEY[ext.service]]
+    if live and live != current.get(API_KEY[ext.service]) and live != target and not replace_refreshed:
+        raise RuntimeError('the running API image came from a security refresh and the target release does not '
+                           'contain it; build the release from that image or pass --replace-refreshed-image')
     snapshot = take_snapshot(ext, directory)
     environment = {**os.environ, 'HOME': str(ext.home)}
     with (directory / 'install.log').open('w') as log:
         result = subprocess.run([sys.executable, '-B', str(script), '--release-images', str(manifest), '--switch'],
                                 stdout=log, stderr=log, env=environment, timeout=600)
     problem = 'installer exited with status %d' % result.returncode if result.returncode else ext.healthy()
-    if problem is None and ext.api_image() != release['images'][API_KEY[ext.service]]:
+    if problem is None and ext.api_image() != target:
         problem = 'running API image differs from the target release'
+    if problem is None and (lost := lost_unit_settings(ext, snapshot)):
+        problem = 'unit settings would be lost (move operator settings to a drop-in): ' + ', '.join(lost)
     receipt = {'service': ext.service, 'target': str(release_dir), 'target_manifest': release['manifest_sha256'],
                'previous_api_image': snapshot['api_image'], 'changed': sorted(changed), 'snapshot': str(directory)}
     if problem is None:
@@ -213,6 +262,8 @@ def main(argv=None):
     action.add_argument('--release', type=Path, help='reviewed release directory to switch to')
     action.add_argument('--rollback', type=Path, help='snapshot directory written by an earlier switch')
     action.add_argument('--check', action='store_true', help='only check readiness and the authenticated list')
+    parser.add_argument('--replace-refreshed-image', action='store_true',
+                        help='allow replacing an API image installed by the security refresh')
     args = parser.parse_args(argv)
     ext = Extension(args.service)
     if args.check:
@@ -224,6 +275,7 @@ def main(argv=None):
     switches.mkdir(mode=0o700, exist_ok=True)
     lock = os.open(switches / 'switch.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    refresh_lock = lock_security_refresh(ext)
     if args.rollback:
         directory = args.rollback.resolve()
         if directory.parent != switches.resolve():
@@ -234,7 +286,7 @@ def main(argv=None):
             receipt, code = ({**receipt, 'status': 'rollback_failed', 'rollback_failure': problem}, 3)
     else:
         directory = switches / time.strftime('%Y%m%dT%H%M%S', time.gmtime())
-        receipt, code = switch(ext, args.release.resolve(), directory)
+        receipt, code = switch(ext, args.release.resolve(), directory, args.replace_refreshed_image)
     (directory / 'receipt.json').write_text(json.dumps(receipt, indent=2))
     print(json.dumps(receipt))
     return code
