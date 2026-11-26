@@ -17,6 +17,10 @@ STUBS = r'''
 set_restart_policy() { :; }
 validate_config() { :; }
 verify_candidate_manifest() { :; }
+check_extensions() {
+  echo "$3" >"$FIXTURE/extensions-checked"
+  [[ ! -e "$FIXTURE/extensions-fail" ]]
+}
 smoke_test() {
   if [[ -e "$FIXTURE/deployed" && -e "$FIXTURE/pause-after-cutover" ]]; then
     rm "$FIXTURE/pause-after-cutover"
@@ -241,6 +245,19 @@ class ApprovalFlowTests(unittest.TestCase):
         self.assertEqual(self.head(), 'v2.11.2')
         self.assertEqual(self.calls(), ['prepare v2.11.2'])
         self.assertEqual(len(self.composed_up()), 1)
+
+    def test_degraded_extension_cannot_roll_back_an_admitted_core(self):
+        self.env['FIRECRAWL_AUTO_DEPLOY'] = '1'
+        self.release('v2.11.2')
+        (self.fixture / 'extensions-fail').touch()
+        result = self.run_main()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('extension compatibility checks degraded', result.stdout)
+        self.assertEqual(self.head(), 'v2.11.2')
+        self.assertIn('tag=v2.11.2', (self.state / 'deployed.env').read_text())
+        self.assertEqual((self.fixture / 'extensions-checked').read_text().strip(), 'v2.11.2')
+        self.assertNotIn('restore', self.calls())
+        self.assertTrue((self.fixture / 'security-refreshed').exists())
 
     def test_auto_deploy_rejects_invalid_policy_before_building(self):
         self.env['FIRECRAWL_AUTO_DEPLOY'] = 'yes'

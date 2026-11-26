@@ -19,6 +19,58 @@ SOURCE = Path(__file__).with_name('firecrawl_update.sh')
 
 @unittest.skipUnless(os.name == 'posix' and shutil.which('bash'), 'GA401 Bash owner required')
 class ResearchUpdaterTests(unittest.TestCase):
+    def test_extension_checks_report_only_health_evidence(self):
+        program = SOURCE.read_text().split("<<'PYEXTENSIONS'\n", 1)[1].split('\nPYEXTENSIONS', 1)[0]
+        contents = {
+            '/v1/search': {'data': [{'url': 'https://example.com'}]},
+            '/v2/search': {'data': {'web': [{'markdown': '# Example'}]}},
+            '/v2/scrape': {'data': {'markdown': '# Example', 'metadata': {'statusCode': 200}}},
+            '/v2/browser': {'sessions': [{'id': 'private-session'}]},
+            '/v2/monitor': {'data': [{'id': 'private-monitor'}]},
+        }
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def reply(self):
+                if self.command == 'POST':
+                    self.rfile.read(int(self.headers['Content-Length']))
+                body = {'success': True, 'searchContinuity': {'provider': 'firecrawl', 'fallback': False},
+                        **contents[self.path]}
+                status = 404 if self.path == '/v2/browser' and self.server.browser_missing else 200
+                raw = json.dumps(body).encode()
+                self.send_response(status)
+                self.send_header('Content-Length', str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+            do_GET = do_POST = reply
+
+            def log_message(self, *_args):
+                pass
+
+        with tempfile.TemporaryDirectory() as directory, http.server.ThreadingHTTPServer(
+                ('127.0.0.1', 0), Handler) as server:
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                endpoint = 'http://127.0.0.1:' + str(server.server_port)
+                args = [sys.executable, '-B', '-c', program, endpoint, directory, 'v2.11.2', 'a' * 40]
+                for missing, fallback in [(False, False), (True, False), (False, True)]:
+                    with self.subTest(missing=missing, fallback=fallback):
+                        server.browser_missing = missing
+                        if fallback:
+                            contents['/v1/search']['searchContinuity'] = {'provider': 'exa', 'fallback': True}
+                        result = subprocess.run(args, capture_output=True, text=True, timeout=10)
+                        self.assertEqual(result.returncode, int(missing or fallback), result.stderr)
+                        report = json.loads((Path(directory) / 'extensions.json').read_text())
+                        self.assertEqual(report, json.loads(result.stdout))
+                        self.assertEqual(report['checks']['browser'], 'http_404' if missing else 'passed')
+                        self.assertEqual(report['checks']['search_v1'], 'invalid_response' if fallback else 'passed')
+                        self.assertEqual(report['tag'], 'v2.11.2')
+                        self.assertNotIn('private-', result.stdout)
+            finally:
+                server.shutdown()
+                thread.join()
+
     def test_snapshot_refuses_missing_recovery_image_before_writing_manifest(self):
         body = SOURCE.read_text().split("<<'PYSNAPSHOT'\n", 1)[1].split('\nPYSNAPSHOT', 1)[0]
         with tempfile.TemporaryDirectory() as temp:

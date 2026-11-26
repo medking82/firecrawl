@@ -1,10 +1,13 @@
 """Install a pinned release into a separate GA401 Compose project. Never edits Firecrawl production."""
-import concurrent.futures,hashlib,json,os,secrets,subprocess,time,uuid,urllib.request
+import concurrent.futures,hashlib,json,os,secrets,subprocess,sys,time,uuid,urllib.request
 from pathlib import Path
 
 HERE=Path(__file__).resolve().parent
 SOURCE=HERE.parents[1]
-ROOT=Path('/home/marck/services/firecrawl-monitor')
+sys.path.insert(0, str(SOURCE / 'deployment'))
+from extension_release import install_images, lock_installation, select_release, verify_project_images
+
+ROOT=Path.home()/'services/firecrawl-monitor'
 STATE=ROOT/'shared'
 PROJECT='firecrawl-monitor'
 ENVFILE=STATE/'runtime.env'
@@ -13,44 +16,53 @@ def run(args,**kwargs):
     return subprocess.run(args,check=True,text=True,**kwargs)
 def output(args): return subprocess.check_output(args,text=True).strip()
 def compose(*args,**kwargs):
-    return run(['docker','compose','--project-name',PROJECT,'--env-file',str(ENVFILE),'-f',str(HERE/'compose.yaml'),*args],**kwargs)
+    return run(['docker','compose','--project-name',PROJECT,'--env-file',str(ENVFILE),'-f',str(HERE/'compose.yaml'),*args],env=compose_env,**kwargs)
 def psql(text):
     return compose('exec','-T','app-db','psql','-X','-U','postgres','-d','monitor','-v','ON_ERROR_STOP=1',input=text)
 def atomic_private(path,text):
     temp=path.with_suffix('.tmp')
     temp.write_text(text); temp.chmod(0o600); temp.replace(path)
 
+release = select_release(SOURCE, ENVFILE, 'monitor', (
+    'deploy.py', 'compose.yaml', '001-monitor.sql', '002-artifact-gc.sql',
+    '003-agent-sponsors.sql', 'test-db.sql', 'judge-bridge.py', 'magpie_judge.py',
+))
 os.umask(0o077)
 STATE.mkdir(parents=True,exist_ok=True,mode=0o700)
+install_lock = lock_installation(STATE)
 baseline={}
-production=Path('/home/marck/github/firecrawl')
+production=Path.home()/'github/firecrawl'
 for name in ['.env','docker-compose.yaml','docker-compose.override.yaml']:
     p=production/name
-    baseline[name]=hashlib.sha256(p.read_bytes()).hexdigest()
-baseline['containers']={n:json.loads(output(['docker','inspect',n]))[0]['State']['StartedAt'] for n in ['firecrawl-api-1','firecrawl-redis-1','firecrawl-rabbitmq-1','firecrawl-nuq-postgres-1','firecrawl-playwright-service-1','firecrawl-foundationdb-1']}
+    if p.is_file():
+        baseline[name]=hashlib.sha256(p.read_bytes()).hexdigest()
+core_containers = output(['docker','ps','--filter','label=com.docker.compose.project=firecrawl',
+                          '--format','{{.Names}}']).splitlines()
+baseline['containers']={name:json.loads(output(['docker','inspect',name]))[0]['State']['StartedAt']
+                        for name in core_containers}
 atomic_private(STATE/'production-before.json',json.dumps(baseline,indent=2))
 
 if not ENVFILE.exists():
     if output(['docker','ps','-aq','--filter','label=com.docker.compose.project='+PROJECT]):
         raise RuntimeError('Unowned existing monitor project; stop before touching it')
-    images={k:json.loads(output(['docker','inspect',n]))[0]['Image'] for k,n in {
-        'BASE_API':'firecrawl-api-1','POSTGRES_IMAGE':'firecrawl-nuq-postgres-1',
-        'RABBIT_IMAGE':'firecrawl-rabbitmq-1','REDIS_IMAGE':'firecrawl-redis-1'}.items()}
-    config={**images,'APP_DB_PASSWORD':secrets.token_hex(32),'MONITOR_IMAGE':'firecrawl-monitor:'+HERE.parents[1].name,
-            'JUDGE_SOCKET_DIR':str(STATE/'judge')}
-    atomic_private(ENVFILE,'\n'.join(f'{k}={v}' for k,v in config.items())+'\n')
+    config = install_images(release, {})
+    config['APP_DB_PASSWORD'] = secrets.token_hex(32)
 else:
-    config=dict(line.split('=',1) for line in ENVFILE.read_text().splitlines() if '=' in line)
-    config['MONITOR_IMAGE']='firecrawl-monitor:'+HERE.parents[1].name
-    atomic_private(ENVFILE,'\n'.join(f'{k}={v}' for k,v in config.items())+'\n')
-
-# Existing cached images only. No mutable tag, registry pull, dependencies or prod rebuild.
-base_tag='firecrawl-monitor-base:'+config['BASE_API'].split(':')[-1]
-run(['docker','tag',config['BASE_API'],base_tag])
-assert output(['docker','image','inspect',base_tag,'--format','{{.Id}}'])==config['BASE_API']
-run(['docker','build','--network=none','--pull=false','--build-arg','BASE_API='+base_tag,
-     '-t',config['MONITOR_IMAGE'],'-f',str(HERE/'Dockerfile'),str(SOURCE)])
-compose('up','-d','app-db','redis','rabbitmq')
+    saved = dict(line.split('=',1) for line in ENVFILE.read_text().splitlines() if '=' in line)
+    config = install_images(release, saved)
+    if release:
+        verify_project_images(release, PROJECT)
+config['JUDGE_SOCKET_DIR'] = str(STATE/'judge')
+if release is None:
+    config['MONITOR_IMAGE'] = 'firecrawl-monitor:' + SOURCE.name
+    base_tag = 'firecrawl-monitor-base:' + config['BASE_API'].split(':')[-1]
+    run(['docker','tag',config['BASE_API'],base_tag])
+    assert output(['docker','image','inspect',base_tag,'--format','{{.Id}}'])==config['BASE_API']
+    run(['docker','build','--network=none','--pull=false','--build-arg','BASE_API='+base_tag,
+         '-t',config['MONITOR_IMAGE'],'-f',str(HERE/'Dockerfile'),str(SOURCE)])
+atomic_private(ENVFILE,'\n'.join(f'{k}={v}' for k,v in config.items())+'\n')
+compose_env = {key: value for key, value in os.environ.items() if key not in config}
+compose('up','--no-build','--pull','never','-d','app-db','redis','rabbitmq')
 for _ in range(30):
     check=subprocess.run(['docker','exec','firecrawl-monitor-app-db-1','pg_isready','-U','postgres','-d','monitor'],capture_output=True)
     if check.returncode==0:break
@@ -58,8 +70,9 @@ for _ in range(30):
 else: raise RuntimeError('Isolated PostgreSQL readiness timeout')
 # The cached image's init SQL may not have run (root-only source permissions).
 # Apply the pinned queue schema explicitly to its own postgres DB before workers.
+queue_schema = SOURCE / ('nuq.sql' if release else 'apps/nuq-postgres/nuq.sql')
 compose('exec','-T','app-db','psql','-X','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1',
-        input=(SOURCE/'apps/nuq-postgres/nuq.sql').read_text())
+        input=queue_schema.read_text())
 psql((HERE/'001-monitor.sql').read_text())
 psql((HERE/'002-artifact-gc.sql').read_text())
 psql((HERE/'003-agent-sponsors.sql').read_text())
@@ -69,7 +82,7 @@ if not clients.exists():
     def phase(name):
         command=['docker','compose','--project-name',PROJECT,'--env-file',str(ENVFILE),'-f',str(HERE/'compose.yaml'),
             'exec','-T','app-db','psql','-X','-U','postgres','-d','monitor','-v','ON_ERROR_STOP=1','-v','phase='+name]
-        result=run(command,input=test_sql,capture_output=True)
+        result=run(command,input=test_sql,capture_output=True,env=compose_env)
         print('DB contract phase passed:',name,flush=True)
         return result.stdout
     phase('contract')
@@ -91,7 +104,9 @@ psql(f"INSERT INTO public.teams(id,name,org_id) VALUES ('{team}','GA401 self-hos
 psql(f"INSERT INTO public.self_hosted_team_policy(team_id,flags) VALUES ('{team}','{{\"rateLimitOverrides\":{{\"crawl\":30,\"crawlStatus\":120}}}}'::jsonb) ON CONFLICT(team_id) DO NOTHING;\n")
 
 socket_dir=STATE/'judge'; socket_dir.mkdir(exist_ok=True,mode=0o700)
-unit=Path('/home/marck/.config/systemd/user/firecrawl-monitor-judge.service')
+units=Path.home()/'.config/systemd/user'
+units.mkdir(parents=True,exist_ok=True,mode=0o700)
+unit=units/'firecrawl-monitor-judge.service'
 unit.write_text(f'''[Unit]
 Description=Firecrawl Monitor Private Magpie Judge
 # Magpie is managed by the system manager, outside this user unit's ordering.
@@ -110,7 +125,7 @@ WantedBy=default.target
 run(['systemctl','--user','daemon-reload'])
 run(['systemctl','--user','enable','--now','firecrawl-monitor-judge.service'])
 run(['systemctl','--user','restart','firecrawl-monitor-judge.service'])
-compose('up','-d','api')
+compose('up','--no-build','--pull','never','-d','api')
 ready=False
 for _ in range(60):
     try:
@@ -121,7 +136,7 @@ for _ in range(60):
 if not ready:
     compose('stop','api')
     raise RuntimeError('Monitor API readiness timeout; isolated API stopped, production remains unchanged')
-prune_unit=Path('/home/marck/.config/systemd/user/firecrawl-monitor-prune.service')
+prune_unit=units/'firecrawl-monitor-prune.service'
 prune_unit.write_text('''[Unit]
 Description=Firecrawl Monitor Retention Pruning
 After=docker.service
@@ -131,7 +146,7 @@ ExecStart=/usr/bin/docker exec firecrawl-monitor-api-1 node /app/monitor-prune.c
 TimeoutStartSec=120
 NoNewPrivileges=true
 ''')
-Path('/home/marck/.config/systemd/user/firecrawl-monitor-prune.timer').write_text('''[Unit]
+(units/'firecrawl-monitor-prune.timer').write_text('''[Unit]
 Description=Hourly Firecrawl Monitor Retention Pruning
 [Timer]
 OnCalendar=hourly
@@ -148,4 +163,9 @@ for name,expected in baseline.items():
     assert hashlib.sha256((production/name).read_bytes()).hexdigest()==expected, 'Production config changed: '+name
 for name,started in baseline['containers'].items():
     assert json.loads(output(['docker','inspect',name]))[0]['State']['StartedAt']==started, 'Production container restarted: '+name
-print(json.dumps({'status':'ready','monitor_url':'http://127.0.0.1:3006','project':PROJECT,'production_unchanged':True,'release':str(SOURCE)}))
+receipt = {'status':'ready','monitor_url':'http://127.0.0.1:3006','project':PROJECT,
+           'production_unchanged':True,'release':str(SOURCE)}
+if release:
+    receipt['release_manifest'] = release
+    atomic_private(STATE/'deployment.json', json.dumps(receipt, indent=2))
+print(json.dumps(receipt))

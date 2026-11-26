@@ -1,10 +1,9 @@
 # GA401 Self-hosted Browser And Interact
 
-An isolated native Firecrawl API overlay supplies browser lifecycle, authenticated
-application state and scrape replay without modifying the existing core or monitor
-projects. It reuses GA401's cached Firecrawl v2.11.621, PostgreSQL, Redis, RabbitMQ
-and Playwright 1.64.1 / Chromium images. Build and startup never pull images or use
-Firecrawl Cloud keys, credits, billing providers or a Cloud fallback.
+An isolated Firecrawl Browser API supplies browser lifecycle, authenticated
+application state and scrape replay. Its release selects the Browser API,
+PostgreSQL, Redis, RabbitMQ and Playwright / Chromium images. Startup uses
+locally loaded images and does not use Firecrawl Cloud keys or billing.
 
 ## Endpoints And State
 
@@ -108,13 +107,25 @@ It changes only the manager unit's executable path while idle.
 The API, CLI bridge, databases, images and existing core/monitor services stay in
 place. `deployment.json` records separate `manager_release` and API `release` IDs.
 
-Package the reviewed source into a new immutable release. Run `python3 -B
-deployment/self-hosted-browser/deploy.py` on GA401 from that release. It snapshots
-all existing core/monitor image IDs and start times and production config hashes,
-pins cached images, builds offline, applies SQL only to its isolated DB, installs
-the two user services, starts the separate API and compares the original services.
-The deployment refuses an unowned existing Compose project. Treat the lifecycle
-manager's Docker access as privileged; do not expose its private HTTP socket.
+For a new installation, run `python3 -B deployment/self-hosted-browser/deploy.py
+--release-inputs` to list the required files and image keys. Package those files
+from the reviewed release, including its matching queue schema at the package
+root as `nuq.sql`. Load the reviewed Browser API, session,
+PostgreSQL, Redis and RabbitMQ images into Docker. Prepare `release-images.json`
+with `service` set to `browser`, the full extension API `source_commit`, `files` mapping
+package-relative paths to SHA-256 hashes, and `images` mapping the listed keys
+to full local `sha256:` image IDs. Keep the reviewed manifest with the release.
+
+From the packaged release, run `python3 -B deployment/self-hosted-browser/deploy.py
+--release-images release-images.json --check-images`. This verifies the package
+files and cached image IDs without starting services. Remove `--check-images`
+to install, or rerun with the same manifest to resume a partial installation.
+The installer uses the reviewed images without a core checkout, core image,
+registry pull or local build. It applies SQL to the isolated DB and compares the
+production services it found before the install. It rejects unowned projects
+and image changes to existing installations. Use the existing upgrade owner
+for a cutover. Existing installations with a saved `BASE_API` can still use
+their archived source overlay build procedure.
 
 `smoke.py` exercises real API sessions, public navigation, persistent DOM, failures,
 timeouts, auth/tenant ownership, network and credential isolation, unsupported

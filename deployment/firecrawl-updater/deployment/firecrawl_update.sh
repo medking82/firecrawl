@@ -450,6 +450,111 @@ print('Firecrawl transport, search and scrape smoke passed')
 PYSMOKE
 }
 
+check_extensions() {
+  python3 -B - "$@" <<'PYEXTENSIONS'
+import datetime as dt
+import json
+import os
+from pathlib import Path
+import sys
+import tempfile
+import time
+from urllib.error import HTTPError, URLError
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
+
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+endpoint = sys.argv[1]
+opener = build_opener(ProxyHandler({}), NoRedirect())
+search = {'query': 'Firecrawl documentation', 'limit': 2}
+probes = (
+    ('search_v1', '/v1/search', search),
+    ('search_v2', '/v2/search', search),
+    ('search_scrape', '/v2/search', {
+        'query': 'example domain IANA', 'limit': 2, 'scrapeOptions': {'formats': ['markdown']}}),
+    ('scrape', '/v2/scrape', {'url': 'https://example.com', 'formats': ['markdown'], 'timeout': 20000}),
+    ('browser', '/v2/browser', None),
+    ('monitor', '/v2/monitor', None),
+)
+
+
+def valid(name, response):
+    if not isinstance(response, dict) or response.get('success') is not True:
+        return False
+    data = response.get('data')
+    if name == 'browser':
+        return isinstance(response.get('sessions'), list)
+    if name == 'monitor':
+        return isinstance(data, list)
+    if name.startswith('search'):
+        info = response.get('searchContinuity')
+        if not isinstance(info, dict) or info.get('provider') != 'firecrawl' or info.get('fallback') is not False:
+            return False
+    if name == 'search_v1':
+        return isinstance(data, list) and bool(data)
+    if not isinstance(data, dict):
+        return False
+    if name == 'scrape':
+        metadata = data.get('metadata')
+        return (isinstance(metadata, dict) and metadata.get('statusCode') == 200
+                and markdown(data))
+    rows = data.get('web')
+    if not isinstance(rows, list) or not rows:
+        return False
+    return name == 'search_v2' or any(markdown(row) for row in rows)
+
+
+def markdown(row):
+    return (isinstance(row, dict) and isinstance(row.get('markdown'), str)
+            and bool(row['markdown'].strip()))
+
+
+def probe(name, path, body):
+    request = Request(endpoint + path, None if body is None else json.dumps(body).encode(),
+                      headers={'Content-Type': 'application/json', 'Cache-Control': 'no-cache'})
+    for attempt in range(2):
+        try:
+            with opener.open(request, timeout=30 if body else 5) as response:
+                raw = response.read(2 * 1024 * 1024 + 1)
+                return 'passed' if len(raw) <= 2 * 1024 * 1024 and valid(name, json.loads(raw)) else 'invalid_response'
+        except HTTPError as error:
+            with error:
+                reason = f'http_{error.code}'
+            if error.code not in (408, 429, 502, 503, 504):
+                return reason
+        except (URLError, OSError):
+            reason = 'unavailable'
+        except (ValueError, RecursionError):
+            return 'invalid_response'
+        if not attempt:
+            time.sleep(2)
+    return reason
+
+
+checks = {name: probe(name, path, body) for name, path, body in probes}
+passed = all(result == 'passed' for result in checks.values())
+report = {'status': 'passed' if passed else 'degraded', 'checks': checks,
+          'checked_at': dt.datetime.now(dt.timezone.utc).isoformat()}
+if len(sys.argv) == 5:
+    folder = Path(sys.argv[2])
+    report.update(tag=sys.argv[3], commit=sys.argv[4])
+    with tempfile.NamedTemporaryFile(dir=folder, prefix='.extensions-', mode='w', delete=False) as stream:
+        try:
+            json.dump(report, stream, sort_keys=True)
+            stream.write('\n')
+            stream.flush()
+            os.replace(stream.name, folder / 'extensions.json')
+        finally:
+            Path(stream.name).unlink(missing_ok=True)
+print(json.dumps(report, sort_keys=True), flush=True)
+sys.exit(0 if passed else 1)
+PYEXTENSIONS
+}
+
 set_restart_policy() {
   # This check precedes release admission: an unknown future tag must never
   # prevent boot recovery for the currently deployed services.
@@ -1807,9 +1912,13 @@ cutover_candidate() {
   printf 'tag=%s\ncommit=%s\nupdated_at=%s\n' "$latest_tag" "$latest_commit" "$(date --iso-8601=seconds)" >"$state_dir/deployed.env"
   gate retire "$state_dir" deployed
   log "update completed at $latest_tag"
-  # The candidate carries its build-time Debian packages. The security owner takes
-  # run.lock and update.lock exclusively, so release both before refreshing it.
+  # Optional services and the image-only security owner run outside the core cutover locks.
   exec 8>&- 9>&-
+  local extensions="extension compatibility checks passed"
+  if ! check_extensions 'http://127.0.0.1:3003' "$candidate_evidence" "$latest_tag" "$latest_commit"; then
+    extensions="extension compatibility checks degraded; inspect $candidate_evidence/extensions.json"
+    log "$extensions"
+  fi
   local security="security refresh failed; core cutover stands" attempt
   # The per-minute recovery timer can hold the owner lock briefly.
   if [[ "${FIRECRAWL_SKIP_SECURITY_REFRESH:-0}" == 1 ]]; then
@@ -1827,10 +1936,14 @@ cutover_candidate() {
     log "post-cutover security refresh failed; inspect $security_journals/latest.json"
   fi
   gate notify "$state_dir" deployed "$latest_tag" "$latest_commit" "$candidate_evidence" \
-    "${previous_tag:-$previous_commit}" "$security" || log "upgrade notice not delivered"
+    "${previous_tag:-$previous_commit}" "$security; $extensions" || log "upgrade notice not delivered"
 }
 
 main() {
+  if [[ "$#" -eq 1 && "$1" == --check-extensions ]]; then
+    check_extensions 'http://127.0.0.1:3003'
+    return
+  fi
   if [[ "$#" -eq 1 && "$1" == --check-only ]]; then
     [[ ! -L "$canonical_state_dir/update.lock" && -f "$canonical_state_dir/update.lock" ]] || return 1
     exec 9<"$canonical_state_dir/update.lock"
@@ -1856,7 +1969,7 @@ PYCHECKLOCK
     return
   fi
   if [[ "$#" -ne 0 ]]; then
-    printf '%s\n' 'Usage: firecrawl-upgrade [--check-only | --status | --approve vX.Y.Z]' >&2
+    printf '%s\n' 'Usage: firecrawl-upgrade [--check-only | --check-extensions | --status | --approve vX.Y.Z]' >&2
     return 64
   fi
   case "${FIRECRAWL_AUTO_DEPLOY:-0}" in
