@@ -154,6 +154,8 @@ class ResearchUpdaterTests(unittest.TestCase):
         self.assertIn('guards/$guard_sha256.py', source)
 
     def test_standalone_smoke_checks_guard_search_and_scrape(self):
+        check_only = SOURCE.read_text().split('== --check-only ]]; then\n', 1)[1].split('\n  fi\n', 1)[0]
+        self.assertLess(check_only.index('cd "$repo"'), check_only.index('smoke_test'))
         body = SOURCE.read_text().split("<<'PYSMOKE'\n", 1)[1].split('\nPYSMOKE', 1)[0]
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); guard = root/'guard.py'
