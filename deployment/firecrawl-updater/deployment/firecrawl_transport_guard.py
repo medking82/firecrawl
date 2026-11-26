@@ -368,6 +368,18 @@ TRANSPORT_PROFILES["v2.11.869"] = {
         _build_root + 'service/service.js': 'd7bd0d7f43f79af7cf086ebfbd9d74cc53b7a9a7bf7b150fdd3f55783f3321bf',
     },
 }
+# Frozen transport audit: deployment/firecrawl-transport-20261126-v870.json.
+# Only config.js gains two optional crawl-state Redis URLs; transport bytes equal v2.11.869.
+_v869 = TRANSPORT_PROFILES["v2.11.869"]
+TRANSPORT_PROFILES["v2.11.870"] = {
+    'receipt_sha256': '37bee0f3a6840c798dcc98ed32f33291d9aafcefc3655e459f002b576a942cf0',
+    'dependencies': dict(_v869['dependencies']),
+    'undici_lib_sha256': _v869['undici_lib_sha256'],
+    'hashes': dict(_v869['hashes']),
+    'syntax_hashes': _v869['syntax_hashes'] | {
+        _build_root + 'config.js': 'ce7c8ac4a72e45592b432d72ea71993efeab38c6d00e031e7c7b963a3e43cbca',
+    },
+}
 EXPECTED_PREDICATES = {
     "ALLOW_LOCAL_WEBHOOKS_true": False,
     "PROXY_SERVER_nonempty": False,

@@ -1,0 +1,38 @@
+{
+  "schema": 2,
+  "profile": "v2.11.870",
+  "scope": "Public static-fetch, open-source engine set (document, fetch, pdf, playwright, wikipedia), service module defaults and request validation after upstream #6058 removed Exchange, fire-engine, GCS file handoff and hosted shell from the core. v2.11.870 adds optional crawl-state Redis stores.",
+  "source_commit": "d355ef9020e34abe52948f8e99577bdaf4d290fc",
+  "baseline_profile": "v2.11.869",
+  "candidate_api_image": "sha256:5d748e7364c206dd0d568527f8704fdb1c3a4ed5eb212763bee67254d5627e54",
+  "export_archive_sha256": "7ccd9092fd0dc19e40cc8ac0e2d0d92b46d2b28f5fd24312745a6ee9f08475dc",
+  "export_file_count": 801,
+  "qualification_host": "GA401 isolated container (--network none, read-only) on the candidate image",
+  "dependencies": {
+    "node_major": "22",
+    "undici": "7.30.1",
+    "ipaddr_js": "2.2.0"
+  },
+  "undici_lib_sha256": "213bda9bf7c6860b6714484b606b431c7bdbe4652a20be22e3e20e8b96e1187c",
+  "dependency_tree_counts": {
+    "undici_lib": "116"
+  },
+  "hosted_shell": "absent",
+  "unchanged_bytes": [
+    "/app/dist/src/scraper/scrapeURL/engines/fetch/index.js",
+    "/app/dist/src/scraper/scrapeURL/engines/utils/downloadFile.js",
+    "/app/dist/src/scraper/scrapeURL/engines/utils/safeFetch.js",
+    "ipaddr.js",
+    "undici/client.js"
+  ],
+  "review": [
+    "All compiled transport hashes, dependencies and the undici lib tree (116 files) equal v2.11.869 in the candidate image.",
+    "Only dist/src/config.js differs: two optional zod strings, REDIS_CRAWL_STATE_URL and REDIS_CRAWL_STATE_FALLBACK_URL.",
+    "New crawl-state Redis connections use only those operator-set URLs and otherwise reuse the existing evict connection; GA401 sets neither.",
+    "No added fetch/undici/axios/http/net/tls/child_process/WebSocket use in the changed modules (v2.11.869..d355ef90 source diff)."
+  ],
+  "hash_overrides": {},
+  "syntax_overrides": {
+    "/app/dist/src/config.js": "ce7c8ac4a72e45592b432d72ea71993efeab38c6d00e031e7c7b963a3e43cbca"
+  }
+}
