@@ -58,18 +58,32 @@ user manager has lingering enabled so logout does not stop the timer.
    receipt reuses that run's successful live check; an existing receipt requires
    a fresh live check. Unknown transport, failed package checks, missing rollback
    images and other failed admission checks never earn automatic authorization.
-3. Cutover acquires the exclusive transport lock, snapshots exact service images
+3. Before any live change, the authorized candidate runs as a separate Compose
+   project, `firecrawl-trial`, on `127.0.0.1:3012` (`FIRECRAWL_TRIAL_PORT`). It
+   uses the candidate's admitted images and rendered Compose config with its
+   own network, volumes, PostgreSQL, Redis, RabbitMQ, FoundationDB and browser
+   service, fresh database and queue credentials, reduced worker counts, and no
+   restart policy. The isolated search sidecar only accepts the live API's IP,
+   so the trial points `SEARXNG_ENDPOINT` at a local fixture that returns
+   `https://example.com/`. Readiness, `/v2/search`, `/v2/search` with
+   `scrapeOptions` Markdown and `/v2/scrape` must pass, and the live `firecrawl`
+   containers must be unchanged. The trial is always removed (`down --volumes`),
+   also on TERM/INT. A failure writes container states to `trial.json` in the
+   candidate evidence, notifies, keeps the authorization and retries at the next
+   scheduled run without touching the live runtime. `/v1/search` is served by the
+   3003 compatibility proxy and is checked after cutover by `check_extensions`.
+4. Cutover acquires the exclusive transport lock, snapshots exact service images
    and consumes the single-use authorization before switching source. Active
    page reads defer the cutover and keep the receipt for the next scheduled run.
    Post-cutover transport, search and scrape smoke tests must pass. Failure rolls
    back to the prior source and exact images. TERM/INT also invoke recovery;
    the service allows 15 minutes for shutdown recovery.
-4. An automatic cutover failure also blocks the same tag/commit/config/guard
+5. An automatic cutover failure also blocks the same tag/commit/config/guard
    combination, preventing an outage loop at every timer tick. A newer release
    or changed configuration/guard is evaluated afresh. Build failures and live
    health failures can retry at the next scheduled run. Changed configuration
    invalidates prior authorization and rebuilds the candidate first.
-5. A newer tag supersedes the old receipt and authorization. Evidence is retained
+6. A newer tag supersedes the old receipt and authorization. Evidence is retained
    for diagnosis and rollback. `firecrawl-upgrade --status` shows candidate,
    authorization, blocked and notice state.
 

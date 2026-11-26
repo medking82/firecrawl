@@ -288,6 +288,8 @@ prepare_candidate() {
 }
 snapshot_images() { record snapshot; }
 verify_candidate_manifest() { record manifest; [[ "$scenario" != manifest-fail ]]; }
+# The isolated trial has its own flow tests (test_firecrawl_approval, test_candidate_trial).
+trial_candidate() { :; }
 docker() { record deploy; [[ "$scenario" != rollback-fail && "$scenario" != deploy-fail ]]; }
 restore_images() { record restore; [[ "$scenario" != rollback-fail ]]; }
 smoke_test() { record smoke; }

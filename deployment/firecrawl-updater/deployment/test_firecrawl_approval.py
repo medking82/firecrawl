@@ -17,6 +17,10 @@ STUBS = r'''
 set_restart_policy() { :; }
 validate_config() { :; }
 verify_candidate_manifest() { :; }
+trial_candidate() {
+  echo "$latest_tag" >>"$FIXTURE/trials"
+  if [[ -e "$FIXTURE/trial-fail-once" ]]; then rm "$FIXTURE/trial-fail-once"; return 1; fi
+}
 check_extensions() {
   echo "$3" >"$FIXTURE/extensions-checked"
   [[ ! -e "$FIXTURE/extensions-fail" ]]
@@ -306,6 +310,40 @@ class ApprovalFlowTests(unittest.TestCase):
         result = self.run_main()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.head(), 'v2.11.3')
+
+    def trials(self):
+        path = self.fixture / 'trials'
+        return path.read_text().splitlines() if path.exists() else []
+
+    def test_failed_trial_leaves_live_unchanged_and_retries_with_the_kept_approval(self):
+        self.env['FIRECRAWL_AUTO_DEPLOY'] = '1'
+        self.release('v2.11.2')
+        (self.fixture / 'trial-fail-once').touch()
+        result = self.run_main()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.trials(), ['v2.11.2'])
+        self.assertEqual(self.head(), 'v2.11.1')
+        self.assertEqual(self.composed_up(), [])
+        self.assertNotIn('restore', self.calls())
+        self.assertTrue((self.state / 'approval.json').exists())
+        self.assertFalse((self.state / 'candidate-blocked.json').exists())
+        self.assertIn('candidate trial failed on an isolated copy; live runtime unchanged',
+                      self.issues()['1']['body'] + ''.join(self.issues()['1']['comments']))
+        # The next scheduled run reuses the admitted candidate, trials it again and cuts over.
+        result = self.run_main()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.trials(), ['v2.11.2', 'v2.11.2'])
+        self.assertEqual(self.calls(), ['prepare v2.11.2'])
+        self.assertEqual(self.head(), 'v2.11.2')
+        self.assertEqual(len(self.composed_up()), 1)
+
+    def test_trial_runs_before_every_cutover(self):
+        self.env['FIRECRAWL_AUTO_DEPLOY'] = '1'
+        self.release('v2.11.2')
+        self.assertEqual(self.run_main().returncode, 0)
+        self.assertEqual(self.trials(), ['v2.11.2'])
+        self.assertEqual(self.run_main().returncode, 0)
+        self.assertEqual(self.trials(), ['v2.11.2'])
 
     def test_auto_deploy_defers_to_active_readers_then_resumes(self):
         import fcntl
