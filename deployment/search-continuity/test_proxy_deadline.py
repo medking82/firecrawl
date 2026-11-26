@@ -161,6 +161,7 @@ class DeadlineTests(unittest.TestCase):
         self.backend.mode = 'removed-cache-options'
         base = {'url': 'https://example.org', 'formats': ['markdown']}
         for options, expected in [({'maxAge': 0, 'storeInCache': False}, 200),
+                                  ({'origin': 'python-sdk@4.53.2', 'maxAge': 14_400_000, 'storeInCache': True}, 200),
                                   ({'maxAge': 1000, 'storeInCache': False}, 400),
                                   ({'maxAge': 0, 'unknown': True}, 400)]:
             with self.subTest(options=options):
@@ -177,7 +178,7 @@ class DeadlineTests(unittest.TestCase):
                     connection.close()
                 requests = [('/v2/scrape', body)]
                 if expected == 200:
-                    requests.append(('/v2/scrape', base))
+                    requests.append(('/v2/scrape', {**base, **({'origin': options['origin']} if 'origin' in options else {})}))
                 self.assertEqual(self.backend.requests, requests)
 
     def wait_backend_closed(self, limit=3.0):

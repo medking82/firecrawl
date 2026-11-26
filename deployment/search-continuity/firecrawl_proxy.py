@@ -468,9 +468,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             first = b''
             if record and response.status == 400:
                 no_cache = set()
-                if type(body.get('maxAge')) is int and body['maxAge'] == 0:
+                sdk_defaults = body.get('origin') in ('python-sdk@4.53.2', 'python-sdk.hermes-agent@4.53.2')
+                max_age = body.get('maxAge')
+                if type(max_age) is int and (max_age == 0 or (sdk_defaults and max_age == 14_400_000)):
                     no_cache.add('maxAge')
-                if body.get('storeInCache') is False:
+                if body.get('storeInCache') is False or (sdk_defaults and body.get('storeInCache') is True):
                     no_cache.add('storeInCache')
                 if no_cache:
                     first = response.read(MAX_JSON + 1)
