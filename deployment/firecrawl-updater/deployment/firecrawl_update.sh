@@ -1957,6 +1957,7 @@ if (not stat.S_ISREG(opened.st_mode) or opened.st_uid != os.getuid()
     raise SystemExit('unsafe Firecrawl coordination lock')
 PYCHECKLOCK
     flock -s -n 9 || { log 'Firecrawl update lock is busy'; return 1; }
+    cd "$repo"
     smoke_test
     log "check-only healthy; no update or state changes"
     return
