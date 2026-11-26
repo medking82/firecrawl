@@ -114,6 +114,26 @@ and security-refresh `run-*/firecrawl-{candidate,recovery}.json`) and re-pin eve
 service image. Cutover renders only the base files plus the candidate image
 overlay, so later security refreshes start from three files again.
 
+## Installing and rolling back the updater
+
+`deployment/install_firecrawl_update.py` replaces `~/.local/bin/firecrawl-upgrade`
+only when `--expected-before` matches the running updater, its guard matches the
+updater's pinned `guard_sha256`, and `update.lock` is idle. Each install writes
+`research-repair-<new sha>.json` and keeps the replaced updater as
+`research-repair-<new sha>.before.sh`; a version that was already installed is
+refused.
+
+```bash
+python3 -B -I install_firecrawl_update.py --source firecrawl_update.sh \
+  --guard-source firecrawl_transport_guard.py --expected-before <running sha256>
+python3 -B -I install_firecrawl_update.py --rollback --expected-before <running sha256>
+```
+
+`--rollback` restores exactly that recorded preimage, after checking its hash and
+that its pinned guard is still installed, and marks the receipt `rolled_back`.
+Repeat it to step further back. A rolled-back version may be installed again;
+its earlier receipt and preimage are kept as `*.rolled-back-<n>.*`.
+
 ## Notice
 
 The updater opens or updates one issue, `[Firecrawl Upgrade] GA401 core candidate`,

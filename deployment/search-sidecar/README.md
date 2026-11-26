@@ -65,8 +65,8 @@ sudo python3 -I -B deploy_search_sidecar.py rollback   # newest backup, or --bac
 `PREVIOUS_SIDECAR_WORKERS`) replaces only the worker file and recreates only
 `search-worker`; `rollback` restores it the same way. The updater contract
 admits one sidecar worker hash, so deploy the worker first and then install the
-matching updater; after a rollback, reinstall the previous updater from the
-installer's preimage backup.
+matching updater; after a rollback, restore the previous updater with
+`install_firecrawl_update.py --rollback --expected-before <running updater SHA-256>`.
 
 Both actions hold the updater `run.lock` and `update.lock`, recreate only
 `api` and `search-worker` with the live Compose files and exact image IDs, and
